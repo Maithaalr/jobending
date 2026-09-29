@@ -1,7 +1,8 @@
 scikit-learn
 streamlit
 pandas
+numpy
 plotly
-Pillow
 openpyxl
+xlrd
 
