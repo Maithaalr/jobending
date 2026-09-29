@@ -1093,26 +1093,6 @@ elif analysis_option == "تحليل أسباب انتهاء الخدمة":
             horizontal=True
         )
 
-        # السبب × الدائرة
-        if "رمز الدائرة" in filtered_df.columns:
-
-            st.markdown(
-                "### أسباب انتهاء الخدمة حسب الدائرة"
-            )
-
-            cross = pd.crosstab(
-                filtered_df["رمز الدائرة"].fillna(
-                    "غير محدد"
-                ),
-                filtered_df[
-                    "سبب انتهاء الخدمة"
-                ].fillna("غير محدد")
-            )
-
-            st.dataframe(
-                cross,
-                use_container_width=True
-            )
 
         # السبب × السنة
         if "سنة انتهاء الخدمة" in filtered_df.columns:
