@@ -1229,23 +1229,61 @@ elif analysis_option == "تحليل الاستقالات":
                 horizontal=True
             )
 
-        if "رمز الدائرة" in resignation_df.columns:
+# ============================================================
+# أسباب الاستقالة حسب الدائرة
+# ============================================================
 
-            st.markdown(
-                "### الاستقالات حسب الدائرة"
-            )
+if (
+    "رمز الدائرة" in resignation_df.columns
+    and "سبب الاستقالة" in resignation_df.columns
+):
 
-            resignation_dept = build_count_table(
-                resignation_df,
-                "رمز الدائرة"
-            )
+    st.markdown("### 📋 أسباب الاستقالة حسب الدائرة")
 
-            show_bar_chart(
-                resignation_dept,
-                "رمز الدائرة",
-                title="الاستقالات حسب الدائرة",
-                horizontal=True
+    resignation_reason_dept = resignation_df.copy()
+
+    resignation_reason_dept["سبب الاستقالة"] = (
+        resignation_reason_dept["سبب الاستقالة"]
+        .fillna("غير محدد")
+        .astype(str)
+        .str.strip()
+    )
+
+    if "الرقم الوظيفي" in resignation_reason_dept.columns:
+
+        resignation_reason_dept = (
+            resignation_reason_dept
+            .groupby(
+                ["رمز الدائرة", "سبب الاستقالة"]
+            )["الرقم الوظيفي"]
+            .nunique()
+            .reset_index(name="العدد")
+        )
+
+    else:
+
+        resignation_reason_dept = (
+            resignation_reason_dept
+            .groupby(
+                ["رمز الدائرة", "سبب الاستقالة"]
             )
+            .size()
+            .reset_index(name="العدد")
+        )
+
+    resignation_reason_dept = (
+        resignation_reason_dept
+        .sort_values(
+            ["رمز الدائرة", "العدد"],
+            ascending=[True, False]
+        )
+    )
+
+    st.dataframe(
+        resignation_reason_dept,
+        use_container_width=True,
+        hide_index=True
+    )
 
         if (
             "سنة انتهاء الخدمة"
