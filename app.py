@@ -2,13 +2,14 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
-import plotly.graph_objects as go
 import re
 from io import BytesIO
 
+
 # ============================================================
-# إعداد الصفحة
+# PAGE CONFIG
 # ============================================================
+
 st.set_page_config(
     page_title="تحليل المنتهية خدماتهم",
     page_icon="📊",
@@ -16,14 +17,17 @@ st.set_page_config(
 )
 
 st.title("📊 لوحة تحليل المنتهية خدماتهم")
+
 st.caption(
-    "تنظيف البيانات تلقائياً، تحليل حالات انتهاء الخدمة، "
-    "الاستقالات، مدة الخدمة، الرواتب والاتجاهات الزمنية."
+    "تحليل حالات انتهاء الخدمة والاستقالات ومدة الخدمة "
+    "والرواتب والاتجاهات الزمنية"
 )
 
+
 # ============================================================
-# أسماء الحقول المتوقعة
+# CONSTANTS
 # ============================================================
+
 EXPECTED_COLUMNS = [
     "رمز الدائرة",
     "الرقم الوظيفي",
@@ -44,9 +48,6 @@ EXPECTED_COLUMNS = [
     "المجموعة الوظيفية الفرعية",
 ]
 
-# ============================================================
-# دوال مساعدة
-# ============================================================
 ARABIC_DIGITS = "٠١٢٣٤٥٦٧٨٩"
 ENGLISH_DIGITS = "0123456789"
 
@@ -55,97 +56,189 @@ TRANSLATION_TABLE = str.maketrans(
     ENGLISH_DIGITS + ".,"
 )
 
-HIDDEN_CHARS_PATTERN = r"[\u200e\u200f\u202a-\u202e\u2066-\u2069\ufeff]"
+HIDDEN_CHARS_PATTERN = (
+    r"[\u200e\u200f\u202a-\u202e\u2066-\u2069\ufeff]"
+)
 
+
+# ============================================================
+# HELPER FUNCTIONS
+# ============================================================
 
 def normalize_column_name(col):
-    """تنظيف اسم العمود."""
+
     col = str(col)
-    col = re.sub(HIDDEN_CHARS_PATTERN, "", col)
+
+    col = re.sub(
+        HIDDEN_CHARS_PATTERN,
+        "",
+        col
+    )
+
     col = col.replace("\xa0", " ")
-    col = re.sub(r"\s+", " ", col)
+
+    col = re.sub(
+        r"\s+",
+        " ",
+        col
+    )
+
     return col.strip()
 
 
 def normalize_text(value):
-    """تنظيف النصوص من المحارف المخفية والمسافات."""
+
     if pd.isna(value):
         return np.nan
 
     value = str(value)
-    value = re.sub(HIDDEN_CHARS_PATTERN, "", value)
-    value = value.replace("\xa0", " ")
-    value = re.sub(r"\s+", " ", value)
+
+    value = re.sub(
+        HIDDEN_CHARS_PATTERN,
+        "",
+        value
+    )
+
+    value = value.replace(
+        "\xa0",
+        " "
+    )
+
+    value = re.sub(
+        r"\s+",
+        " ",
+        value
+    )
+
     value = value.strip()
 
-    if value.lower() in ["", "nan", "none", "null"]:
+    if value.lower() in [
+        "",
+        "nan",
+        "none",
+        "null"
+    ]:
         return np.nan
 
     return value
 
 
 def arabic_to_english_numbers(value):
-    """تحويل الأرقام العربية إلى إنجليزية."""
+
     if pd.isna(value):
         return value
 
-    return str(value).translate(TRANSLATION_TABLE)
+    return str(value).translate(
+        TRANSLATION_TABLE
+    )
 
 
 def clean_date(value):
-    """تنظيف وتحويل التاريخ."""
+
     if pd.isna(value):
         return pd.NaT
 
-    value = arabic_to_english_numbers(value)
-    value = re.sub(HIDDEN_CHARS_PATTERN, "", str(value))
-    value = value.replace("\xa0", " ").strip()
+    value = arabic_to_english_numbers(
+        value
+    )
 
-    if value.lower() in ["", "0", "nan", "none", "null", "-", "--"]:
+    value = re.sub(
+        HIDDEN_CHARS_PATTERN,
+        "",
+        str(value)
+    )
+
+    value = value.replace(
+        "\xa0",
+        " "
+    ).strip()
+
+    if value.lower() in [
+        "",
+        "0",
+        "nan",
+        "none",
+        "null",
+        "-",
+        "--"
+    ]:
         return pd.NaT
 
-    # محاولة مباشرة dd/mm/yyyy
-    date_value = pd.to_datetime(
+    # First attempt: DD/MM/YYYY
+    result = pd.to_datetime(
         value,
         format="%d/%m/%Y",
         errors="coerce"
     )
 
-    # إذا لم ينجح، محاولة مرنة
-    if pd.isna(date_value):
-        date_value = pd.to_datetime(
+    # Second attempt
+    if pd.isna(result):
+
+        result = pd.to_datetime(
             value,
             dayfirst=True,
             errors="coerce"
         )
 
-    return date_value
+    return result
 
 
 def clean_salary(value):
-    """تنظيف الراتب وتحويله إلى رقم."""
+
     if pd.isna(value):
         return np.nan
 
-    value = arabic_to_english_numbers(value)
-    value = re.sub(HIDDEN_CHARS_PATTERN, "", str(value))
-    value = value.replace("\xa0", "")
-    value = value.replace(" ", "")
-    value = value.replace(",", "")
+    value = arabic_to_english_numbers(
+        value
+    )
 
-    # إبقاء الأرقام والنقطة والسالب فقط
-    value = re.sub(r"[^0-9.\-]", "", value)
+    value = re.sub(
+        HIDDEN_CHARS_PATTERN,
+        "",
+        str(value)
+    )
 
-    if value in ["", ".", "-", "-."]:
+    value = value.replace(
+        "\xa0",
+        ""
+    )
+
+    value = value.replace(
+        " ",
+        ""
+    )
+
+    value = value.replace(
+        ",",
+        ""
+    )
+
+    value = re.sub(
+        r"[^0-9.\-]",
+        "",
+        value
+    )
+
+    if value in [
+        "",
+        ".",
+        "-",
+        "-."
+    ]:
         return np.nan
 
     try:
         return float(value)
-    except:
+
+    except ValueError:
         return np.nan
 
 
-def format_number(value, decimals=0):
+def format_number(
+    value,
+    decimals=0
+):
+
     if pd.isna(value):
         return "—"
 
@@ -153,64 +246,87 @@ def format_number(value, decimals=0):
 
 
 def safe_mode(series):
+
     series = series.dropna()
 
-    if len(series) == 0:
+    if series.empty:
         return "—"
 
-    modes = series.mode()
+    mode_values = series.mode()
 
-    if len(modes) == 0:
+    if mode_values.empty:
         return "—"
 
-    return str(modes.iloc[0])
+    return str(
+        mode_values.iloc[0]
+    )
 
 
 def count_unique_employees(data):
-    """عدد الموظفين الفريدين إذا توفر الرقم الوظيفي."""
-    if "الرقم الوظيفي" in data.columns:
-        s = data["الرقم الوظيفي"].dropna()
 
-        if len(s) > 0:
-            return s.nunique()
+    if "الرقم الوظيفي" in data.columns:
+
+        values = data[
+            "الرقم الوظيفي"
+        ].dropna()
+
+        if not values.empty:
+            return values.nunique()
 
     return len(data)
 
 
 def find_resignation_mask(data):
-    """
-    تحديد حالات الاستقالة بشكل مرن.
-    يبحث عن كلمة استقال في سبب انتهاء الخدمة.
-    """
+
     if "سبب انتهاء الخدمة" not in data.columns:
-        return pd.Series(False, index=data.index)
 
-    s = data["سبب انتهاء الخدمة"].fillna("").astype(str)
+        return pd.Series(
+            False,
+            index=data.index
+        )
 
-    return s.str.contains("استقال", case=False, regex=False)
+    values = (
+        data["سبب انتهاء الخدمة"]
+        .fillna("")
+        .astype(str)
+    )
+
+    return values.str.contains(
+        "استقال",
+        case=False,
+        regex=False
+    )
 
 
 def calculate_service_fields(data):
-    """حساب مدة الخدمة."""
+
     data = data.copy()
 
-    if (
-        "تاريخ التعيين" in data.columns
-        and "تاريخ انتهاء الخدمة" in data.columns
+    required = [
+        "تاريخ التعيين",
+        "تاريخ انتهاء الخدمة"
+    ]
+
+    if all(
+        col in data.columns
+        for col in required
     ):
+
         data["مدة الخدمة بالأيام"] = (
             data["تاريخ انتهاء الخدمة"]
-            - data["تاريخ التعيين"]
+            -
+            data["تاريخ التعيين"]
         ).dt.days
 
-        # القيم السالبة تعتبر غير صحيحة
+        # Invalid negative service
         data.loc[
             data["مدة الخدمة بالأيام"] < 0,
             "مدة الخدمة بالأيام"
         ] = np.nan
 
         data["مدة الخدمة بالسنوات"] = (
-            data["مدة الخدمة بالأيام"] / 365.25
+            data["مدة الخدمة بالأيام"]
+            / 365.25
         ).round(2)
 
         bins = [
@@ -243,20 +359,27 @@ def calculate_service_fields(data):
 
 
 def add_time_fields(data):
-    """إضافة السنة والشهر من تاريخ انتهاء الخدمة."""
+
     data = data.copy()
 
     if "تاريخ انتهاء الخدمة" in data.columns:
+
         data["سنة انتهاء الخدمة"] = (
-            data["تاريخ انتهاء الخدمة"].dt.year
+            data[
+                "تاريخ انتهاء الخدمة"
+            ].dt.year
         )
 
         data["رقم شهر انتهاء الخدمة"] = (
-            data["تاريخ انتهاء الخدمة"].dt.month
+            data[
+                "تاريخ انتهاء الخدمة"
+            ].dt.month
         )
 
         data["شهر انتهاء الخدمة"] = (
-            data["تاريخ انتهاء الخدمة"]
+            data[
+                "تاريخ انتهاء الخدمة"
+            ]
             .dt.to_period("M")
             .astype(str)
         )
@@ -264,33 +387,55 @@ def add_time_fields(data):
     return data
 
 
-def build_count_table(data, column):
-    """جدول العدد والنسبة."""
+def build_count_table(
+    data,
+    column
+):
+
     if column not in data.columns:
         return pd.DataFrame()
 
-    temp = data[column].fillna("غير محدد")
-
-    table = (
-        temp.value_counts(dropna=False)
-        .rename_axis(column)
-        .reset_index(name="العدد")
+    values = (
+        data[column]
+        .fillna("غير محدد")
+        .astype(str)
+        .str.strip()
     )
 
-    total = table["العدد"].sum()
+    table = (
+        values
+        .value_counts(
+            dropna=False
+        )
+        .rename_axis(column)
+        .reset_index(
+            name="العدد"
+        )
+    )
+
+    total = table[
+        "العدد"
+    ].sum()
 
     if total > 0:
+
         table["النسبة %"] = (
-            table["العدد"] / total * 100
+            table["العدد"]
+            / total
+            * 100
         ).round(2)
+
     else:
+
         table["النسبة %"] = 0
 
     return table
 
 
-def create_excel_download(sheets):
-    """إنشاء ملف Excel من عدة جداول."""
+def create_excel_download(
+    sheets
+):
+
     output = BytesIO()
 
     with pd.ExcelWriter(
@@ -303,20 +448,31 @@ def create_excel_download(sheets):
             if table is None:
                 continue
 
-            if not isinstance(table, pd.DataFrame):
+            if not isinstance(
+                table,
+                pd.DataFrame
+            ):
                 continue
 
-            safe_name = str(sheet_name)[:31]
+            safe_name = str(
+                sheet_name
+            )[:31]
 
-            export_df = table.copy()
+            export_df = (
+                table.copy()
+            )
 
-            # Excel لا يدعم timezone
             for col in export_df.columns:
+
                 if pd.api.types.is_datetime64_any_dtype(
                     export_df[col]
                 ):
-                    export_df[col] = export_df[col].dt.strftime(
-                        "%d/%m/%Y"
+
+                    export_df[col] = (
+                        export_df[col]
+                        .dt.strftime(
+                            "%d/%m/%Y"
+                        )
                     )
 
             export_df.to_excel(
@@ -326,6 +482,7 @@ def create_excel_download(sheets):
             )
 
     output.seek(0)
+
     return output
 
 
@@ -334,18 +491,28 @@ def show_bar_chart(
     category,
     value="العدد",
     title="",
-    horizontal=False
+    horizontal=False,
+    key=None
 ):
+
     if table.empty:
-        st.info("لا توجد بيانات كافية لعرض الرسم.")
+
+        st.info(
+            "لا توجد بيانات كافية لعرض الرسم."
+        )
+
         return
 
     chart_data = table.copy()
 
     if horizontal:
-        chart_data = chart_data.sort_values(
-            value,
-            ascending=True
+
+        chart_data = (
+            chart_data
+            .sort_values(
+                value,
+                ascending=True
+            )
         )
 
         fig = px.bar(
@@ -356,7 +523,9 @@ def show_bar_chart(
             text=value,
             title=title
         )
+
     else:
+
         fig = px.bar(
             chart_data,
             x=category,
@@ -371,116 +540,234 @@ def show_bar_chart(
         yaxis_title=""
     )
 
+    if key is None:
+
+        key = (
+            f"chart_"
+            f"{category}_"
+            f"{value}_"
+            f"{title}"
+        )
+
     st.plotly_chart(
         fig,
         use_container_width=True,
-        key=f"bar_{title}_{category}_{value}"
+        key=key
     )
 
 
+def multiselect_filter(
+    data,
+    column,
+    label,
+    key
+):
+
+    if column not in data.columns:
+        return data
+
+    values = sorted(
+        data[column]
+        .dropna()
+        .astype(str)
+        .unique()
+        .tolist()
+    )
+
+    if not values:
+        return data
+
+    selected = (
+        st.sidebar.multiselect(
+            label,
+            options=values,
+            key=key
+        )
+    )
+
+    if selected:
+
+        data = data[
+            data[column]
+            .astype(str)
+            .isin(selected)
+        ]
+
+    return data
+
+
 # ============================================================
-# رفع الملف
+# FILE UPLOAD
 # ============================================================
+
 uploaded_file = st.file_uploader(
     "📂 ارفعي تقرير المنتهية خدماتهم",
-    type=["xlsx", "xls"]
+    type=[
+        "xlsx",
+        "xls"
+    ]
 )
 
 if uploaded_file is None:
-    st.info("ارفعي ملف Excel لبدء التحليل.")
+
+    st.info(
+        "ارفعي ملف Excel لبدء التحليل."
+    )
+
     st.stop()
 
 
 # ============================================================
-# اختيار Sheet
+# READ EXCEL
 # ============================================================
+
 try:
-    excel_file = pd.ExcelFile(uploaded_file)
+
+    excel_file = pd.ExcelFile(
+        uploaded_file
+    )
 
 except Exception as e:
-    st.error(f"تعذر قراءة ملف Excel: {e}")
+
+    st.error(
+        f"تعذر قراءة ملف Excel: {e}"
+    )
+
     st.stop()
 
 
-if len(excel_file.sheet_names) > 1:
+if len(
+    excel_file.sheet_names
+) > 1:
+
     selected_sheet = st.selectbox(
         "اختر ورقة البيانات",
         excel_file.sheet_names
     )
+
 else:
-    selected_sheet = excel_file.sheet_names[0]
+
+    selected_sheet = (
+        excel_file.sheet_names[0]
+    )
 
 
 try:
+
     df_raw = pd.read_excel(
         uploaded_file,
         sheet_name=selected_sheet
     )
 
 except Exception as e:
-    st.error(f"حدث خطأ أثناء قراءة البيانات: {e}")
+
+    st.error(
+        f"حدث خطأ أثناء قراءة البيانات: {e}"
+    )
+
     st.stop()
 
 
 # ============================================================
-# تنظيف أسماء الأعمدة
+# CLEAN COLUMN NAMES
 # ============================================================
+
 df_raw.columns = [
     normalize_column_name(c)
     for c in df_raw.columns
 ]
 
-# إزالة الصفوف الفارغة بالكامل
-df_raw = df_raw.dropna(how="all").copy()
+df_raw = (
+    df_raw
+    .dropna(
+        how="all"
+    )
+    .copy()
+)
 
-original_row_count = len(df_raw)
+original_row_count = len(
+    df_raw
+)
+
 
 # ============================================================
-# معالجة اختلاف بسيط في أسماء الأعمدة
+# COLUMN ALIASES
 # ============================================================
+
 COLUMN_ALIASES = {
-    "الراتب الأساسي": "الراتب الاساسي",
-    "الراتب الأساسي ": "الراتب الاساسي",
-    "رمز الدائرة ": "رمز الدائرة",
-    "الفئة الوظيفية ": "الفئة الوظيفية",
-    "المجموعة الوظيفية الرئيسية ": "المجموعة الوظيفية الرئيسية",
-    "المجموعة الوظيفية الفرعية ": "المجموعة الوظيفية الفرعية",
+    "الراتب الأساسي":
+        "الراتب الاساسي",
+
+    "الراتب الاساسي ":
+        "الراتب الاساسي",
+
+    "رمز الدائرة ":
+        "رمز الدائرة",
+
+    "الفئة الوظيفية ":
+        "الفئة الوظيفية",
+
+    "المجموعة الوظيفية الرئيسية ":
+        "المجموعة الوظيفية الرئيسية",
+
+    "المجموعة الوظيفية الفرعية ":
+        "المجموعة الوظيفية الفرعية"
 }
 
 rename_dict = {}
 
-for old, new in COLUMN_ALIASES.items():
-    if old in df_raw.columns and new not in df_raw.columns:
-        rename_dict[old] = new
+for old, new in (
+    COLUMN_ALIASES.items()
+):
 
-df_raw = df_raw.rename(columns=rename_dict)
+    if (
+        old in df_raw.columns
+        and
+        new not in df_raw.columns
+    ):
+
+        rename_dict[
+            old
+        ] = new
+
+
+df_raw = df_raw.rename(
+    columns=rename_dict
+)
+
 
 # ============================================================
-# التحقق من الحقول
+# MISSING COLUMNS
 # ============================================================
+
 missing_columns = [
-    c for c in EXPECTED_COLUMNS
-    if c not in df_raw.columns
+    col
+    for col in EXPECTED_COLUMNS
+    if col not in df_raw.columns
 ]
 
 if missing_columns:
+
     with st.expander(
-        "⚠️ حقول غير موجودة في الملف",
-        expanded=False
+        "⚠️ حقول غير موجودة في الملف"
     ):
+
         st.write(
-            "سيستمر التحليل بالحقول المتوفرة، "
-            "ولكن بعض المؤشرات قد لا تظهر."
+            "سيستمر التحليل بالحقول "
+            "الموجودة."
         )
 
-        st.write(missing_columns)
+        st.write(
+            missing_columns
+        )
+
 
 # ============================================================
-# تنظيف البيانات
+# DATA CLEANING
 # ============================================================
+
 df = df_raw.copy()
 
-# تنظيف النصوص
 TEXT_COLUMNS = [
     "رمز الدائرة",
     "الرقم الوظيفي",
@@ -494,215 +781,292 @@ TEXT_COLUMNS = [
     "سبب الاستقالة",
     "الفئة الوظيفية",
     "المجموعة الوظيفية الرئيسية",
-    "المجموعة الوظيفية الفرعية",
+    "المجموعة الوظيفية الفرعية"
 ]
 
 for col in TEXT_COLUMNS:
-    if col in df.columns:
-        df[col] = df[col].apply(normalize_text)
 
-# حفظ النص الأصلي للتواريخ لفحص الجودة
+    if col in df.columns:
+
+        df[col] = (
+            df[col]
+            .apply(
+                normalize_text
+            )
+        )
+
+
+# ============================================================
+# DATES
+# ============================================================
+
 if "تاريخ التعيين" in df.columns:
-    original_hire_dates = df["تاريخ التعيين"].copy()
-    df["تاريخ التعيين"] = df["تاريخ التعيين"].apply(
-        clean_date
+
+    original_hire_dates = (
+        df[
+            "تاريخ التعيين"
+        ].copy()
     )
+
+    df["تاريخ التعيين"] = (
+        df[
+            "تاريخ التعيين"
+        ]
+        .apply(
+            clean_date
+        )
+    )
+
 else:
-    original_hire_dates = pd.Series(dtype="object")
+
+    original_hire_dates = (
+        pd.Series(
+            dtype="object"
+        )
+    )
+
 
 if "تاريخ انتهاء الخدمة" in df.columns:
-    original_end_dates = df["تاريخ انتهاء الخدمة"].copy()
-    df["تاريخ انتهاء الخدمة"] = (
-        df["تاريخ انتهاء الخدمة"].apply(clean_date)
-    )
-else:
-    original_end_dates = pd.Series(dtype="object")
 
-# تنظيف الرواتب
+    original_end_dates = (
+        df[
+            "تاريخ انتهاء الخدمة"
+        ].copy()
+    )
+
+    df["تاريخ انتهاء الخدمة"] = (
+        df[
+            "تاريخ انتهاء الخدمة"
+        ]
+        .apply(
+            clean_date
+        )
+    )
+
+else:
+
+    original_end_dates = (
+        pd.Series(
+            dtype="object"
+        )
+    )
+
+
+# ============================================================
+# SALARIES
+# ============================================================
+
 for salary_col in [
     "مجموع الراتب",
     "الراتب الاساسي"
 ]:
+
     if salary_col in df.columns:
-        df[salary_col] = df[salary_col].apply(
-            clean_salary
+
+        df[salary_col] = (
+            df[salary_col]
+            .apply(
+                clean_salary
+            )
         )
 
-# حساب مدة الخدمة
-df = calculate_service_fields(df)
-
-# إضافة الحقول الزمنية
-df = add_time_fields(df)
 
 # ============================================================
-# فحص جودة البيانات
+# CALCULATED FIELDS
 # ============================================================
+
+df = calculate_service_fields(
+    df
+)
+
+df = add_time_fields(
+    df
+)
+
+
+# ============================================================
+# DATA QUALITY COUNTS
+# ============================================================
+
 invalid_hire_dates = 0
 invalid_end_dates = 0
+negative_service = 0
+
 
 if "تاريخ التعيين" in df.columns:
-    valid_original = (
-        original_hire_dates.notna()
-        & ~original_hire_dates.astype(str)
-        .str.strip()
-        .isin(["", "0", "٠", "nan"])
+
+    valid_original_hire = (
+        original_hire_dates
+        .notna()
     )
 
     invalid_hire_dates = (
-        valid_original
-        & df["تاريخ التعيين"].isna()
+        valid_original_hire
+        &
+        df[
+            "تاريخ التعيين"
+        ].isna()
     ).sum()
 
+
 if "تاريخ انتهاء الخدمة" in df.columns:
-    valid_original = (
-        original_end_dates.notna()
-        & ~original_end_dates.astype(str)
-        .str.strip()
-        .isin(["", "0", "٠", "nan"])
+
+    valid_original_end = (
+        original_end_dates
+        .notna()
     )
 
     invalid_end_dates = (
-        valid_original
-        & df["تاريخ انتهاء الخدمة"].isna()
+        valid_original_end
+        &
+        df[
+            "تاريخ انتهاء الخدمة"
+        ].isna()
     ).sum()
 
-negative_service = 0
 
 if (
     "تاريخ التعيين" in df.columns
-    and "تاريخ انتهاء الخدمة" in df.columns
+    and
+    "تاريخ انتهاء الخدمة" in df.columns
 ):
+
     negative_service = (
-        df["تاريخ انتهاء الخدمة"]
-        < df["تاريخ التعيين"]
+        df[
+            "تاريخ انتهاء الخدمة"
+        ]
+        <
+        df[
+            "تاريخ التعيين"
+        ]
     ).sum()
 
 
 # ============================================================
-# Sidebar Filters
+# SIDEBAR FILTERS
 # ============================================================
-st.sidebar.header("🔎 الفلاتر")
+
+st.sidebar.header(
+    "🔎 الفلاتر"
+)
 
 filtered_df = df.copy()
-
-
-def multiselect_filter(data, column, label):
-    if column not in data.columns:
-        return data
-
-    values = sorted(
-        data[column]
-        .dropna()
-        .astype(str)
-        .unique()
-        .tolist()
-    )
-
-    if len(values) == 0:
-        return data
-
-    selected = st.sidebar.multiselect(
-        label,
-        options=values
-    )
-
-    if selected:
-        data = data[
-            data[column]
-            .astype(str)
-            .isin(selected)
-        ]
-
-    return data
 
 
 filtered_df = multiselect_filter(
     filtered_df,
     "رمز الدائرة",
-    "الدائرة"
+    "الدائرة",
+    "filter_department"
 )
 
-# السنوات
-if "سنة انتهاء الخدمة" in filtered_df.columns:
+
+if (
+    "سنة انتهاء الخدمة"
+    in filtered_df.columns
+):
 
     years = sorted(
-        filtered_df["سنة انتهاء الخدمة"]
+        filtered_df[
+            "سنة انتهاء الخدمة"
+        ]
         .dropna()
         .astype(int)
         .unique()
         .tolist()
     )
 
-    selected_years = st.sidebar.multiselect(
-        "سنة انتهاء الخدمة",
-        years
+    selected_years = (
+        st.sidebar.multiselect(
+            "سنة انتهاء الخدمة",
+            years,
+            key="filter_year"
+        )
     )
 
     if selected_years:
-        filtered_df = filtered_df[
-            filtered_df["سنة انتهاء الخدمة"]
-            .isin(selected_years)
-        ]
+
+        filtered_df = (
+            filtered_df[
+                filtered_df[
+                    "سنة انتهاء الخدمة"
+                ].isin(
+                    selected_years
+                )
+            ]
+        )
+
 
 filtered_df = multiselect_filter(
     filtered_df,
     "سبب انتهاء الخدمة",
-    "سبب انتهاء الخدمة"
+    "سبب انتهاء الخدمة",
+    "filter_end_reason"
 )
 
 filtered_df = multiselect_filter(
     filtered_df,
     "سبب الاستقالة",
-    "سبب الاستقالة"
+    "سبب الاستقالة",
+    "filter_resignation_reason"
 )
 
 filtered_df = multiselect_filter(
     filtered_df,
     "فئة الجنسية",
-    "فئة الجنسية"
+    "فئة الجنسية",
+    "filter_nationality_category"
 )
 
 filtered_df = multiselect_filter(
     filtered_df,
     "الجنسية",
-    "الجنسية"
+    "الجنسية",
+    "filter_nationality"
 )
 
 filtered_df = multiselect_filter(
     filtered_df,
     "الفئة الوظيفية",
-    "الفئة الوظيفية"
+    "الفئة الوظيفية",
+    "filter_job_category"
 )
 
 filtered_df = multiselect_filter(
     filtered_df,
     "المجموعة الوظيفية الرئيسية",
-    "المجموعة الوظيفية الرئيسية"
+    "المجموعة الوظيفية الرئيسية",
+    "filter_main_group"
 )
 
 filtered_df = multiselect_filter(
     filtered_df,
     "المجموعة الوظيفية الفرعية",
-    "المجموعة الوظيفية الفرعية"
+    "المجموعة الوظيفية الفرعية",
+    "filter_sub_group"
 )
 
 filtered_df = multiselect_filter(
     filtered_df,
     "الدرجة الوظيفية",
-    "الدرجة الوظيفية"
+    "الدرجة الوظيفية",
+    "filter_grade"
 )
 
-# ============================================================
-# حالة عدم وجود نتائج
-# ============================================================
+
 if filtered_df.empty:
-    st.warning("لا توجد نتائج مطابقة للفلاتر الحالية.")
+
+    st.warning(
+        "لا توجد نتائج مطابقة للفلاتر الحالية."
+    )
+
     st.stop()
 
 
 # ============================================================
-# اختيار نوع التحليل
+# ANALYSIS OPTION
 # ============================================================
+
 st.divider()
 
 analysis_option = st.selectbox(
@@ -723,64 +1087,118 @@ analysis_option = st.selectbox(
     ]
 )
 
-# ============================================================
-# KPIs عامة
-# ============================================================
-employee_count = count_unique_employees(filtered_df)
-
-resignation_mask = find_resignation_mask(filtered_df)
-resignation_count = count_unique_employees(
-    filtered_df[resignation_mask]
-)
-
-resignation_pct = (
-    resignation_count / employee_count * 100
-    if employee_count > 0
-    else 0
-)
-
-avg_service = (
-    filtered_df["مدة الخدمة بالسنوات"].mean()
-    if "مدة الخدمة بالسنوات" in filtered_df.columns
-    else np.nan
-)
-
-median_service = (
-    filtered_df["مدة الخدمة بالسنوات"].median()
-    if "مدة الخدمة بالسنوات" in filtered_df.columns
-    else np.nan
-)
-
-total_salary = (
-    filtered_df["مجموع الراتب"].sum()
-    if "مجموع الراتب" in filtered_df.columns
-    else np.nan
-)
-
-avg_salary = (
-    filtered_df["مجموع الراتب"].mean()
-    if "مجموع الراتب" in filtered_df.columns
-    else np.nan
-)
-
 
 # ============================================================
-# 1. نظرة عامة
+# GENERAL CALCULATIONS
 # ============================================================
+
+employee_count = (
+    count_unique_employees(
+        filtered_df
+    )
+)
+
+resignation_mask = (
+    find_resignation_mask(
+        filtered_df
+    )
+)
+
+resignation_df = (
+    filtered_df[
+        resignation_mask
+    ].copy()
+)
+
+resignation_count = (
+    count_unique_employees(
+        resignation_df
+    )
+)
+
+if employee_count > 0:
+
+    resignation_pct = (
+        resignation_count
+        / employee_count
+        * 100
+    )
+
+else:
+
+    resignation_pct = 0
+
+
+if (
+    "مدة الخدمة بالسنوات"
+    in filtered_df.columns
+):
+
+    avg_service = (
+        filtered_df[
+            "مدة الخدمة بالسنوات"
+        ].mean()
+    )
+
+    median_service = (
+        filtered_df[
+            "مدة الخدمة بالسنوات"
+        ].median()
+    )
+
+else:
+
+    avg_service = np.nan
+    median_service = np.nan
+
+
+if (
+    "مجموع الراتب"
+    in filtered_df.columns
+):
+
+    total_salary = (
+        filtered_df[
+            "مجموع الراتب"
+        ].sum()
+    )
+
+    avg_salary = (
+        filtered_df[
+            "مجموع الراتب"
+        ].mean()
+    )
+
+else:
+
+    total_salary = np.nan
+    avg_salary = np.nan
+
+
+# ============================================================
+# OPTION 1 - OVERVIEW
+# ============================================================
+
 if analysis_option == "نظرة عامة":
 
-    st.subheader("📌 المؤشرات الرئيسية")
+    st.subheader(
+        "📌 المؤشرات الرئيسية"
+    )
 
     c1, c2, c3 = st.columns(3)
 
     c1.metric(
         "إجمالي المنتهية خدماتهم",
-        format_number(employee_count)
+        format_number(
+            employee_count
+        )
     )
 
     c2.metric(
         "عدد الاستقالات",
-        format_number(resignation_count)
+        format_number(
+            resignation_count
+        )
     )
 
     c3.metric(
@@ -790,145 +1208,335 @@ if analysis_option == "نظرة عامة":
 
     c4, c5, c6 = st.columns(3)
 
-    c4.metric(
-        "متوسط مدة الخدمة",
-        (
+    if pd.notna(
+        avg_service
+    ):
+
+        c4.metric(
+            "متوسط مدة الخدمة",
             f"{avg_service:.2f} سنة"
-            if pd.notna(avg_service)
-            else "—"
         )
-    )
 
-    c5.metric(
-        "إجمالي مجموع الرواتب",
-        (
+    else:
+
+        c4.metric(
+            "متوسط مدة الخدمة",
+            "—"
+        )
+
+    if pd.notna(
+        total_salary
+    ):
+
+        c5.metric(
+            "إجمالي مجموع الرواتب",
             f"{total_salary:,.2f}"
-            if pd.notna(total_salary)
-            else "—"
         )
-    )
 
-    c6.metric(
-        "متوسط مجموع الراتب",
-        (
-            f"{avg_salary:,.2f}"
-            if pd.notna(avg_salary)
-            else "—"
+    else:
+
+        c5.metric(
+            "إجمالي مجموع الرواتب",
+            "—"
         )
-    )
+
+    if pd.notna(
+        avg_salary
+    ):
+
+        c6.metric(
+            "متوسط مجموع الراتب",
+            f"{avg_salary:,.2f}"
+        )
+
+    else:
+
+        c6.metric(
+            "متوسط مجموع الراتب",
+            "—"
+        )
 
     st.divider()
 
-    col1, col2 = st.columns(2)
+    # --------------------------------------------------------
+    # END REASONS TABLE
+    # --------------------------------------------------------
 
-    with col1:
+    st.markdown(
+        "### 📋 أسباب انتهاء الخدمة"
+    )
 
-        st.markdown("### أسباب انتهاء الخدمة")
-
-        reason_table = build_count_table(
+    reasons_table = (
+        build_count_table(
             filtered_df,
             "سبب انتهاء الخدمة"
         )
+    )
 
-        if not reason_table.empty:
-            fig = px.pie(
-                reason_table,
-                names="سبب انتهاء الخدمة",
-                values="العدد",
-                hole=0.45
+    if not reasons_table.empty:
+
+        total_end_cases = (
+            reasons_table[
+                "العدد"
+            ].sum()
+        )
+
+        st.metric(
+            "إجمالي حالات انتهاء الخدمة",
+            f"{total_end_cases:,}"
+        )
+
+        st.dataframe(
+            reasons_table,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "سبب انتهاء الخدمة":
+                    st.column_config.TextColumn(
+                        "سبب انتهاء الخدمة"
+                    ),
+                "العدد":
+                    st.column_config.NumberColumn(
+                        "العدد",
+                        format="%d"
+                    ),
+                "النسبة %":
+                    st.column_config.NumberColumn(
+                        "النسبة %",
+                        format="%.2f%%"
+                    )
+            }
+        )
+
+    # --------------------------------------------------------
+    # RESIGNATIONS BY DEPARTMENT TABLE
+    # --------------------------------------------------------
+
+    st.markdown(
+        "### 🚪 عدد المستقيلين حسب الدائرة"
+    )
+
+    if (
+        not resignation_df.empty
+        and
+        "رمز الدائرة"
+        in resignation_df.columns
+    ):
+
+        if (
+            "الرقم الوظيفي"
+            in resignation_df.columns
+        ):
+
+            resignation_dept = (
+                resignation_df
+                .groupby(
+                    "رمز الدائرة"
+                )[
+                    "الرقم الوظيفي"
+                ]
+                .nunique()
+                .reset_index(
+                    name="عدد المستقيلين"
+                )
             )
 
-            st.plotly_chart(
-                fig,
-                use_container_width=True,
-                key="overview_reasons"
+        else:
+
+            resignation_dept = (
+                resignation_df
+                .groupby(
+                    "رمز الدائرة"
+                )
+                .size()
+                .reset_index(
+                    name="عدد المستقيلين"
+                )
             )
 
-    with col2:
+        resignation_dept = (
+            resignation_dept
+            .sort_values(
+                "عدد المستقيلين",
+                ascending=False
+            )
+            .reset_index(
+                drop=True
+            )
+        )
 
-        st.markdown("### المنتهية خدماتهم حسب الدائرة")
+        total_resignations = (
+            resignation_dept[
+                "عدد المستقيلين"
+            ].sum()
+        )
 
-        dept_table = build_count_table(
+        resignation_dept[
+            "النسبة من إجمالي الاستقالات %"
+        ] = (
+            resignation_dept[
+                "عدد المستقيلين"
+            ]
+            / total_resignations
+            * 100
+        ).round(2)
+
+        resignation_dept.insert(
+            0,
+            "الترتيب",
+            range(
+                1,
+                len(
+                    resignation_dept
+                ) + 1
+            )
+        )
+
+        st.dataframe(
+            resignation_dept,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "الترتيب":
+                    st.column_config.NumberColumn(
+                        "الترتيب",
+                        format="%d"
+                    ),
+                "رمز الدائرة":
+                    st.column_config.TextColumn(
+                        "الدائرة"
+                    ),
+                "عدد المستقيلين":
+                    st.column_config.NumberColumn(
+                        "عدد المستقيلين",
+                        format="%d"
+                    ),
+                "النسبة من إجمالي الاستقالات %":
+                    st.column_config.NumberColumn(
+                        "النسبة من إجمالي الاستقالات",
+                        format="%.2f%%"
+                    )
+            }
+        )
+
+    else:
+
+        st.info(
+            "لا توجد استقالات ضمن البيانات الحالية."
+        )
+
+    # --------------------------------------------------------
+    # DEPARTMENT TABLE
+    # --------------------------------------------------------
+
+    st.markdown(
+        "### 🏢 المنتهية خدماتهم حسب الدائرة"
+    )
+
+    dept_table = (
+        build_count_table(
             filtered_df,
             "رمز الدائرة"
         )
+    )
 
-        if not dept_table.empty:
-            fig = px.bar(
-                dept_table.sort_values(
-                    "العدد",
-                    ascending=True
-                ),
-                x="العدد",
-                y="رمز الدائرة",
-                orientation="h",
+    if not dept_table.empty:
+
+        st.dataframe(
+            dept_table,
+            use_container_width=True,
+            hide_index=True
+        )
+
+    # --------------------------------------------------------
+    # YEARLY TREND
+    # --------------------------------------------------------
+
+    if (
+        "سنة انتهاء الخدمة"
+        in filtered_df.columns
+    ):
+
+        st.markdown(
+            "### 📈 الاتجاه السنوي"
+        )
+
+        yearly = (
+            filtered_df
+            .dropna(
+                subset=[
+                    "سنة انتهاء الخدمة"
+                ]
+            )
+            .groupby(
+                "سنة انتهاء الخدمة"
+            )
+            .size()
+            .reset_index(
+                name="العدد"
+            )
+            .sort_values(
+                "سنة انتهاء الخدمة"
+            )
+        )
+
+        if not yearly.empty:
+
+            yearly[
+                "سنة انتهاء الخدمة"
+            ] = (
+                yearly[
+                    "سنة انتهاء الخدمة"
+                ]
+                .astype(int)
+            )
+
+            fig = px.line(
+                yearly,
+                x="سنة انتهاء الخدمة",
+                y="العدد",
+                markers=True,
                 text="العدد"
             )
 
             st.plotly_chart(
                 fig,
                 use_container_width=True,
-                key="overview_departments"
-            )
-
-    # Trend
-    if "سنة انتهاء الخدمة" in filtered_df.columns:
-
-        st.markdown("### 📈 الاتجاه السنوي")
-
-        trend = (
-            filtered_df
-            .dropna(subset=["سنة انتهاء الخدمة"])
-            .groupby("سنة انتهاء الخدمة")
-            .size()
-            .reset_index(name="العدد")
-            .sort_values("سنة انتهاء الخدمة")
-        )
-
-        if not trend.empty:
-            fig = px.line(
-                trend,
-                x="سنة انتهاء الخدمة",
-                y="العدد",
-                markers=True
-            )
-
-            st.plotly_chart(
-                fig,
-                use_container_width=True,
-                key="overview_trend"
+                key="overview_yearly"
             )
 
 
 # ============================================================
-# 2. تحليل حسب الدائرة
+# OPTION 2 - DEPARTMENT
 # ============================================================
+
 elif analysis_option == "تحليل حسب الدائرة":
 
-    st.subheader("🏢 تحليل المنتهية خدماتهم حسب الدائرة")
+    st.subheader(
+        "🏢 تحليل حسب الدائرة"
+    )
 
-    if "رمز الدائرة" not in filtered_df.columns:
-        st.warning("حقل رمز الدائرة غير موجود.")
+    if (
+        "رمز الدائرة"
+        not in filtered_df.columns
+    ):
+
+        st.warning(
+            "حقل رمز الدائرة غير موجود."
+        )
 
     else:
 
-        dept = (
-            filtered_df
-            .groupby("رمز الدائرة", dropna=False)
-            .agg(
-                عدد_الحالات=(
-                    "رمز الدائرة",
-                    "size"
-                )
-            )
-            .reset_index()
-        )
+        if (
+            "الرقم الوظيفي"
+            in filtered_df.columns
+        ):
 
-        # عدد الموظفين الفريدين
-        if "الرقم الوظيفي" in filtered_df.columns:
-            unique_emp = (
+            dept_analysis = (
                 filtered_df
-                .groupby("رمز الدائرة")[
+                .groupby(
+                    "رمز الدائرة"
+                )[
                     "الرقم الوظيفي"
                 ]
                 .nunique()
@@ -937,22 +1545,30 @@ elif analysis_option == "تحليل حسب الدائرة":
                 )
             )
 
-            dept = dept.merge(
-                unique_emp,
-                on="رمز الدائرة",
-                how="left"
-            )
-
         else:
-            dept["عدد المنتهية خدماتهم"] = (
-                dept["عدد_الحالات"]
+
+            dept_analysis = (
+                filtered_df
+                .groupby(
+                    "رمز الدائرة"
+                )
+                .size()
+                .reset_index(
+                    name="عدد المنتهية خدماتهم"
+                )
             )
 
-        # متوسط مدة الخدمة
-        if "مدة الخدمة بالسنوات" in filtered_df.columns:
-            temp = (
+        # Average service
+        if (
+            "مدة الخدمة بالسنوات"
+            in filtered_df.columns
+        ):
+
+            service_dept = (
                 filtered_df
-                .groupby("رمز الدائرة")[
+                .groupby(
+                    "رمز الدائرة"
+                )[
                     "مدة الخدمة بالسنوات"
                 ]
                 .mean()
@@ -962,17 +1578,25 @@ elif analysis_option == "تحليل حسب الدائرة":
                 )
             )
 
-            dept = dept.merge(
-                temp,
-                on="رمز الدائرة",
-                how="left"
+            dept_analysis = (
+                dept_analysis.merge(
+                    service_dept,
+                    on="رمز الدائرة",
+                    how="left"
+                )
             )
 
-        # متوسط الراتب
-        if "مجموع الراتب" in filtered_df.columns:
-            temp = (
+        # Average salary
+        if (
+            "مجموع الراتب"
+            in filtered_df.columns
+        ):
+
+            salary_dept = (
                 filtered_df
-                .groupby("رمز الدائرة")[
+                .groupby(
+                    "رمز الدائرة"
+                )[
                     "مجموع الراتب"
                 ]
                 .mean()
@@ -982,125 +1606,291 @@ elif analysis_option == "تحليل حسب الدائرة":
                 )
             )
 
-            dept = dept.merge(
-                temp,
-                on="رمز الدائرة",
-                how="left"
+            dept_analysis = (
+                dept_analysis.merge(
+                    salary_dept,
+                    on="رمز الدائرة",
+                    how="left"
+                )
             )
 
-        # السبب الأكثر شيوعاً
-        if "سبب انتهاء الخدمة" in filtered_df.columns:
-            top_reason = (
+        # Top reason
+        if (
+            "سبب انتهاء الخدمة"
+            in filtered_df.columns
+        ):
+
+            reason_dept = (
                 filtered_df
-                .groupby("رمز الدائرة")[
+                .groupby(
+                    "رمز الدائرة"
+                )[
                     "سبب انتهاء الخدمة"
                 ]
-                .agg(safe_mode)
+                .agg(
+                    safe_mode
+                )
                 .reset_index(
                     name="أكثر سبب انتهاء خدمة"
                 )
             )
 
-            dept = dept.merge(
-                top_reason,
-                on="رمز الدائرة",
-                how="left"
+            dept_analysis = (
+                dept_analysis.merge(
+                    reason_dept,
+                    on="رمز الدائرة",
+                    how="left"
+                )
             )
 
-        total_dept = dept[
-            "عدد المنتهية خدماتهم"
-        ].sum()
+        total_dept_cases = (
+            dept_analysis[
+                "عدد المنتهية خدماتهم"
+            ].sum()
+        )
 
-        dept["النسبة من الإجمالي %"] = (
-            dept["عدد المنتهية خدماتهم"]
-            / total_dept
+        dept_analysis[
+            "النسبة من الإجمالي %"
+        ] = (
+            dept_analysis[
+                "عدد المنتهية خدماتهم"
+            ]
+            / total_dept_cases
             * 100
         ).round(2)
 
-        dept = dept.sort_values(
-            "عدد المنتهية خدماتهم",
-            ascending=False
+        dept_analysis = (
+            dept_analysis
+            .sort_values(
+                "عدد المنتهية خدماتهم",
+                ascending=False
+            )
         )
 
         st.dataframe(
-            dept,
+            dept_analysis,
             use_container_width=True,
             hide_index=True
         )
 
-        fig = px.bar(
-            dept.sort_values(
-                "عدد المنتهية خدماتهم"
-            ),
-            x="عدد المنتهية خدماتهم",
-            y="رمز الدائرة",
-            orientation="h",
-            text="عدد المنتهية خدماتهم"
+        show_bar_chart(
+            dept_analysis,
+            "رمز الدائرة",
+            value="عدد المنتهية خدماتهم",
+            title="المنتهية خدماتهم حسب الدائرة",
+            horizontal=True,
+            key="dept_chart"
         )
 
-        st.plotly_chart(
-            fig,
-            use_container_width=True,
-            key="dept_analysis"
-        )
-
-        # الوحدة التنظيمية
-        if "الوحدة التنظيمية" in filtered_df.columns:
+        # Organizational units
+        if (
+            "الوحدة التنظيمية"
+            in filtered_df.columns
+        ):
 
             st.markdown(
-                "### الوحدات التنظيمية الأعلى في انتهاء الخدمة"
+                "### الوحدات التنظيمية"
             )
 
-            units = build_count_table(
-                filtered_df,
-                "الوحدة التنظيمية"
-            ).head(20)
+            unit_table = (
+                build_count_table(
+                    filtered_df,
+                    "الوحدة التنظيمية"
+                )
+            )
 
             st.dataframe(
-                units,
+                unit_table,
                 use_container_width=True,
                 hide_index=True
             )
 
 
 # ============================================================
-# 3. أسباب انتهاء الخدمة
+# OPTION 3 - END REASONS
 # ============================================================
+
 elif analysis_option == "تحليل أسباب انتهاء الخدمة":
 
-    st.subheader("📋 تحليل أسباب انتهاء الخدمة")
-
-    reasons = build_count_table(
-        filtered_df,
-        "سبب انتهاء الخدمة"
+    st.subheader(
+        "📋 تحليل أسباب انتهاء الخدمة"
     )
 
-    if reasons.empty:
-        st.warning("لا توجد بيانات لسبب انتهاء الخدمة.")
+    if (
+        "سبب انتهاء الخدمة"
+        not in filtered_df.columns
+    ):
+
+        st.warning(
+            "حقل سبب انتهاء الخدمة غير موجود."
+        )
 
     else:
 
+        reasons_table = (
+            build_count_table(
+                filtered_df,
+                "سبب انتهاء الخدمة"
+            )
+        )
+
+        total_reasons = (
+            reasons_table[
+                "العدد"
+            ].sum()
+        )
+
+        st.metric(
+            "إجمالي حالات انتهاء الخدمة",
+            f"{total_reasons:,}"
+        )
+
+        st.markdown(
+            "### الأسباب والعدد والنسبة"
+        )
+
         st.dataframe(
-            reasons,
+            reasons_table,
             use_container_width=True,
-            hide_index=True
+            hide_index=True,
+            column_config={
+                "سبب انتهاء الخدمة":
+                    st.column_config.TextColumn(
+                        "سبب انتهاء الخدمة"
+                    ),
+                "العدد":
+                    st.column_config.NumberColumn(
+                        "العدد",
+                        format="%d"
+                    ),
+                "النسبة %":
+                    st.column_config.NumberColumn(
+                        "النسبة %",
+                        format="%.2f%%"
+                    )
+            }
         )
 
-        show_bar_chart(
-            reasons,
-            "سبب انتهاء الخدمة",
-            title="توزيع أسباب انتهاء الخدمة",
-            horizontal=True
-        )
+        if not reasons_table.empty:
 
+            top_reason = (
+                reasons_table.iloc[0]
+            )
 
-        # السبب × السنة
-        if "سنة انتهاء الخدمة" in filtered_df.columns:
+            c1, c2 = st.columns(2)
+
+            c1.metric(
+                "أكثر سبب لانتهاء الخدمة",
+                str(
+                    top_reason[
+                        "سبب انتهاء الخدمة"
+                    ]
+                )
+            )
+
+            c2.metric(
+                "عدد حالات السبب الأعلى",
+                f"{int(top_reason['العدد']):,}"
+            )
+
+        # Reasons by department
+        if (
+            "رمز الدائرة"
+            in filtered_df.columns
+        ):
+
+            st.markdown(
+                "### أسباب انتهاء الخدمة حسب الدائرة"
+            )
+
+            reason_dept_table = (
+                filtered_df
+                .assign(
+                    سبب_منظف=(
+                        filtered_df[
+                            "سبب انتهاء الخدمة"
+                        ]
+                        .fillna(
+                            "غير محدد"
+                        )
+                    )
+                )
+                .groupby(
+                    [
+                        "رمز الدائرة",
+                        "سبب_منظف"
+                    ]
+                )
+                .size()
+                .reset_index(
+                    name="العدد"
+                )
+                .rename(
+                    columns={
+                        "سبب_منظف":
+                            "سبب انتهاء الخدمة"
+                    }
+                )
+            )
+
+            dept_totals = (
+                reason_dept_table
+                .groupby(
+                    "رمز الدائرة"
+                )[
+                    "العدد"
+                ]
+                .transform(
+                    "sum"
+                )
+            )
+
+            reason_dept_table[
+                "النسبة داخل الدائرة %"
+            ] = (
+                reason_dept_table[
+                    "العدد"
+                ]
+                / dept_totals
+                * 100
+            ).round(2)
+
+            reason_dept_table = (
+                reason_dept_table
+                .sort_values(
+                    [
+                        "رمز الدائرة",
+                        "العدد"
+                    ],
+                    ascending=[
+                        True,
+                        False
+                    ]
+                )
+            )
+
+            st.dataframe(
+                reason_dept_table,
+                use_container_width=True,
+                hide_index=True
+            )
+
+        # Reasons by year
+        if (
+            "سنة انتهاء الخدمة"
+            in filtered_df.columns
+        ):
+
+            st.markdown(
+                "### أسباب انتهاء الخدمة حسب السنة"
+            )
 
             reason_year = (
                 filtered_df
                 .dropna(
-                    subset=["سنة انتهاء الخدمة"]
+                    subset=[
+                        "سنة انتهاء الخدمة"
+                    ]
                 )
                 .groupby(
                     [
@@ -1110,160 +1900,390 @@ elif analysis_option == "تحليل أسباب انتهاء الخدمة":
                     dropna=False
                 )
                 .size()
-                .reset_index(name="العدد")
+                .reset_index(
+                    name="العدد"
+                )
             )
 
             if not reason_year.empty:
 
-                fig = px.line(
+                reason_year[
+                    "سنة انتهاء الخدمة"
+                ] = (
+                    reason_year[
+                        "سنة انتهاء الخدمة"
+                    ]
+                    .astype(int)
+                )
+
+                year_totals = (
+                    reason_year
+                    .groupby(
+                        "سنة انتهاء الخدمة"
+                    )[
+                        "العدد"
+                    ]
+                    .transform(
+                        "sum"
+                    )
+                )
+
+                reason_year[
+                    "النسبة داخل السنة %"
+                ] = (
+                    reason_year[
+                        "العدد"
+                    ]
+                    / year_totals
+                    * 100
+                ).round(2)
+
+                st.dataframe(
                     reason_year,
-                    x="سنة انتهاء الخدمة",
-                    y="العدد",
-                    color="سبب انتهاء الخدمة",
-                    markers=True
-                )
-
-                st.plotly_chart(
-                    fig,
                     use_container_width=True,
-                    key="reason_year"
+                    hide_index=True
                 )
 
 
 # ============================================================
-# 4. تحليل الاستقالات
+# OPTION 4 - RESIGNATIONS
 # ============================================================
+
 elif analysis_option == "تحليل الاستقالات":
 
-    st.subheader("🚪 تحليل الاستقالات")
-
-    resignation_df = filtered_df[
-        resignation_mask
-    ].copy()
+    st.subheader(
+        "🚪 تحليل الاستقالات"
+    )
 
     if resignation_df.empty:
+
         st.info(
-            "لا توجد حالات تم التعرف عليها كاستقالة "
+            "لا توجد حالات استقالة "
             "ضمن الفلاتر الحالية."
         )
 
     else:
 
-        resignation_employees = (
-            count_unique_employees(resignation_df)
-        )
-
-        avg_resignation_service = (
-            resignation_df[
-                "مدة الخدمة بالسنوات"
-            ].mean()
-            if "مدة الخدمة بالسنوات"
+        if (
+            "مدة الخدمة بالسنوات"
             in resignation_df.columns
-            else np.nan
-        )
+        ):
+
+            avg_resignation_service = (
+                resignation_df[
+                    "مدة الخدمة بالسنوات"
+                ].mean()
+            )
+
+        else:
+
+            avg_resignation_service = (
+                np.nan
+            )
 
         c1, c2, c3 = st.columns(3)
 
         c1.metric(
-            "عدد الاستقالات",
-            format_number(
-                resignation_employees
-            )
+            "إجمالي عدد المستقيلين",
+            f"{resignation_count:,}"
         )
 
         c2.metric(
-            "نسبة الاستقالات من الحالات",
-            f"{resignation_pct:.1f}%"
+            "نسبة الاستقالات من حالات انتهاء الخدمة",
+            f"{resignation_pct:.2f}%"
         )
 
-        c3.metric(
-            "متوسط الخدمة قبل الاستقالة",
-            (
+        if pd.notna(
+            avg_resignation_service
+        ):
+
+            c3.metric(
+                "متوسط مدة الخدمة قبل الاستقالة",
                 f"{avg_resignation_service:.2f} سنة"
-                if pd.notna(
-                    avg_resignation_service
-                )
-                else "—"
             )
-        )
 
-        if "سبب الاستقالة" in resignation_df.columns:
+        else:
 
-            st.markdown("### أسباب الاستقالة")
+            c3.metric(
+                "متوسط مدة الخدمة قبل الاستقالة",
+                "—"
+            )
 
-            resignation_reasons = build_count_table(
-                resignation_df,
-                "سبب الاستقالة"
+        # ----------------------------------------------------
+        # RESIGNATIONS BY DEPARTMENT
+        # ----------------------------------------------------
+
+        if (
+            "رمز الدائرة"
+            in resignation_df.columns
+        ):
+
+            st.markdown(
+                "### 🏢 عدد المستقيلين حسب الدائرة"
+            )
+
+            if (
+                "الرقم الوظيفي"
+                in resignation_df.columns
+            ):
+
+                resignation_dept = (
+                    resignation_df
+                    .groupby(
+                        "رمز الدائرة"
+                    )[
+                        "الرقم الوظيفي"
+                    ]
+                    .nunique()
+                    .reset_index(
+                        name="عدد المستقيلين"
+                    )
+                )
+
+            else:
+
+                resignation_dept = (
+                    resignation_df
+                    .groupby(
+                        "رمز الدائرة"
+                    )
+                    .size()
+                    .reset_index(
+                        name="عدد المستقيلين"
+                    )
+                )
+
+            resignation_dept = (
+                resignation_dept
+                .sort_values(
+                    "عدد المستقيلين",
+                    ascending=False
+                )
+                .reset_index(
+                    drop=True
+                )
+            )
+
+            total_resignations = (
+                resignation_dept[
+                    "عدد المستقيلين"
+                ].sum()
+            )
+
+            resignation_dept[
+                "النسبة من إجمالي الاستقالات %"
+            ] = (
+                resignation_dept[
+                    "عدد المستقيلين"
+                ]
+                / total_resignations
+                * 100
+            ).round(2)
+
+            resignation_dept.insert(
+                0,
+                "الترتيب",
+                range(
+                    1,
+                    len(
+                        resignation_dept
+                    ) + 1
+                )
+            )
+
+            st.dataframe(
+                resignation_dept,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "الترتيب":
+                        st.column_config.NumberColumn(
+                            "الترتيب",
+                            format="%d"
+                        ),
+                    "رمز الدائرة":
+                        st.column_config.TextColumn(
+                            "الدائرة"
+                        ),
+                    "عدد المستقيلين":
+                        st.column_config.NumberColumn(
+                            "عدد المستقيلين",
+                            format="%d"
+                        ),
+                    "النسبة من إجمالي الاستقالات %":
+                        st.column_config.NumberColumn(
+                            "النسبة من إجمالي الاستقالات",
+                            format="%.2f%%"
+                        )
+                }
+            )
+
+            show_bar_chart(
+                resignation_dept,
+                "رمز الدائرة",
+                value="عدد المستقيلين",
+                title="عدد المستقيلين حسب الدائرة",
+                horizontal=True,
+                key="resignation_dept_chart"
+            )
+
+        # ----------------------------------------------------
+        # RESIGNATION REASONS
+        # ----------------------------------------------------
+
+        if (
+            "سبب الاستقالة"
+            in resignation_df.columns
+        ):
+
+            st.markdown(
+                "### 📋 أسباب الاستقالة"
+            )
+
+            resignation_reasons = (
+                build_count_table(
+                    resignation_df,
+                    "سبب الاستقالة"
+                )
             )
 
             st.dataframe(
                 resignation_reasons,
                 use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "سبب الاستقالة":
+                        st.column_config.TextColumn(
+                            "سبب الاستقالة"
+                        ),
+                    "العدد":
+                        st.column_config.NumberColumn(
+                            "العدد",
+                            format="%d"
+                        ),
+                    "النسبة %":
+                        st.column_config.NumberColumn(
+                            "النسبة %",
+                            format="%.2f%%"
+                        )
+                }
+            )
+
+        # ----------------------------------------------------
+        # RESIGNATION REASON BY DEPARTMENT
+        # ----------------------------------------------------
+
+        if (
+            "رمز الدائرة"
+            in resignation_df.columns
+            and
+            "سبب الاستقالة"
+            in resignation_df.columns
+        ):
+
+            st.markdown(
+                "### 📊 أسباب الاستقالة حسب الدائرة"
+            )
+
+            resignation_reason_dept = (
+                resignation_df.copy()
+            )
+
+            resignation_reason_dept[
+                "سبب الاستقالة"
+            ] = (
+                resignation_reason_dept[
+                    "سبب الاستقالة"
+                ]
+                .fillna(
+                    "غير محدد"
+                )
+                .astype(str)
+                .str.strip()
+            )
+
+            if (
+                "الرقم الوظيفي"
+                in resignation_reason_dept.columns
+            ):
+
+                resignation_reason_dept = (
+                    resignation_reason_dept
+                    .groupby(
+                        [
+                            "رمز الدائرة",
+                            "سبب الاستقالة"
+                        ]
+                    )[
+                        "الرقم الوظيفي"
+                    ]
+                    .nunique()
+                    .reset_index(
+                        name="العدد"
+                    )
+                )
+
+            else:
+
+                resignation_reason_dept = (
+                    resignation_reason_dept
+                    .groupby(
+                        [
+                            "رمز الدائرة",
+                            "سبب الاستقالة"
+                        ]
+                    )
+                    .size()
+                    .reset_index(
+                        name="العدد"
+                    )
+                )
+
+            dept_resignation_totals = (
+                resignation_reason_dept
+                .groupby(
+                    "رمز الدائرة"
+                )[
+                    "العدد"
+                ]
+                .transform(
+                    "sum"
+                )
+            )
+
+            resignation_reason_dept[
+                "النسبة داخل الدائرة %"
+            ] = (
+                resignation_reason_dept[
+                    "العدد"
+                ]
+                / dept_resignation_totals
+                * 100
+            ).round(2)
+
+            resignation_reason_dept = (
+                resignation_reason_dept
+                .sort_values(
+                    [
+                        "رمز الدائرة",
+                        "العدد"
+                    ],
+                    ascending=[
+                        True,
+                        False
+                    ]
+                )
+            )
+
+            st.dataframe(
+                resignation_reason_dept,
+                use_container_width=True,
                 hide_index=True
             )
 
-            show_bar_chart(
-                resignation_reasons.head(20),
-                "سبب الاستقالة",
-                title="أسباب الاستقالة",
-                horizontal=True
-            )
-
-# ============================================================
-# أسباب الاستقالة حسب الدائرة
-# ============================================================
-
-if (
-    "رمز الدائرة" in resignation_df.columns
-    and "سبب الاستقالة" in resignation_df.columns
-):
-
-    st.markdown("### 📋 أسباب الاستقالة حسب الدائرة")
-
-    resignation_reason_dept = resignation_df.copy()
-
-    resignation_reason_dept["سبب الاستقالة"] = (
-        resignation_reason_dept["سبب الاستقالة"]
-        .fillna("غير محدد")
-        .astype(str)
-        .str.strip()
-    )
-
-    if "الرقم الوظيفي" in resignation_reason_dept.columns:
-
-        resignation_reason_dept = (
-            resignation_reason_dept
-            .groupby(
-                ["رمز الدائرة", "سبب الاستقالة"]
-            )["الرقم الوظيفي"]
-            .nunique()
-            .reset_index(name="العدد")
-        )
-
-    else:
-
-        resignation_reason_dept = (
-            resignation_reason_dept
-            .groupby(
-                ["رمز الدائرة", "سبب الاستقالة"]
-            )
-            .size()
-            .reset_index(name="العدد")
-        )
-
-    resignation_reason_dept = (
-        resignation_reason_dept
-        .sort_values(
-            ["رمز الدائرة", "العدد"],
-            ascending=[True, False]
-        )
-    )
-
-    st.dataframe(
-        resignation_reason_dept,
-        use_container_width=True,
-        hide_index=True
-    )
+        # ----------------------------------------------------
+        # RESIGNATION TREND
+        # ----------------------------------------------------
 
         if (
             "سنة انتهاء الخدمة"
@@ -1271,137 +2291,143 @@ if (
         ):
 
             st.markdown(
-                "### اتجاه الاستقالات عبر السنوات"
+                "### 📈 اتجاه الاستقالات عبر السنوات"
             )
 
             resignation_trend = (
                 resignation_df
                 .dropna(
-                    subset=["سنة انتهاء الخدمة"]
+                    subset=[
+                        "سنة انتهاء الخدمة"
+                    ]
                 )
-                .groupby("سنة انتهاء الخدمة")
+                .groupby(
+                    "سنة انتهاء الخدمة"
+                )
                 .size()
-                .reset_index(name="العدد")
+                .reset_index(
+                    name="عدد الاستقالات"
+                )
+                .sort_values(
+                    "سنة انتهاء الخدمة"
+                )
             )
 
-            fig = px.line(
-                resignation_trend,
-                x="سنة انتهاء الخدمة",
-                y="العدد",
-                markers=True
-            )
+            if not resignation_trend.empty:
 
-            st.plotly_chart(
-                fig,
-                use_container_width=True,
-                key="resignation_trend"
-            )
+                resignation_trend[
+                    "سنة انتهاء الخدمة"
+                ] = (
+                    resignation_trend[
+                        "سنة انتهاء الخدمة"
+                    ]
+                    .astype(int)
+                )
+
+                fig = px.line(
+                    resignation_trend,
+                    x="سنة انتهاء الخدمة",
+                    y="عدد الاستقالات",
+                    markers=True,
+                    text="عدد الاستقالات"
+                )
+
+                st.plotly_chart(
+                    fig,
+                    use_container_width=True,
+                    key="resignation_yearly_trend"
+                )
 
 
 # ============================================================
-# 5. تحليل مدة الخدمة
+# OPTION 5 - SERVICE LENGTH
 # ============================================================
+
 elif analysis_option == "تحليل مدة الخدمة":
 
-    st.subheader("⏳ تحليل مدة الخدمة")
+    st.subheader(
+        "⏳ تحليل مدة الخدمة"
+    )
 
-    if "مدة الخدمة بالسنوات" not in filtered_df.columns:
+    if (
+        "مدة الخدمة بالسنوات"
+        not in filtered_df.columns
+    ):
+
         st.warning(
-            "لا يمكن حساب مدة الخدمة لعدم توفر "
-            "تاريخ التعيين وتاريخ انتهاء الخدمة."
+            "لا يمكن حساب مدة الخدمة."
         )
 
     else:
 
-        service = filtered_df[
-            "مدة الخدمة بالسنوات"
-        ].dropna()
+        service_values = (
+            filtered_df[
+                "مدة الخدمة بالسنوات"
+            ]
+            .dropna()
+        )
 
-        if service.empty:
+        if service_values.empty:
+
             st.warning(
-                "لا توجد مدد خدمة صالحة للتحليل."
+                "لا توجد مدد خدمة صالحة."
             )
 
         else:
 
-            c1, c2, c3, c4 = st.columns(4)
+            c1, c2, c3, c4 = (
+                st.columns(4)
+            )
 
             c1.metric(
                 "متوسط مدة الخدمة",
-                f"{service.mean():.2f} سنة"
+                f"{service_values.mean():.2f} سنة"
             )
 
             c2.metric(
-                "الوسيط",
-                f"{service.median():.2f} سنة"
+                "وسيط مدة الخدمة",
+                f"{service_values.median():.2f} سنة"
             )
 
             c3.metric(
-                "أقل مدة",
-                f"{service.min():.2f} سنة"
+                "أقل مدة خدمة",
+                f"{service_values.min():.2f} سنة"
             )
 
             c4.metric(
-                "أعلى مدة",
-                f"{service.max():.2f} سنة"
+                "أعلى مدة خدمة",
+                f"{service_values.max():.2f} سنة"
             )
 
-            service_table = build_count_table(
-                filtered_df,
-                "فئة مدة الخدمة"
+            service_table = (
+                build_count_table(
+                    filtered_df,
+                    "فئة مدة الخدمة"
+                )
             )
 
-            # ترتيب الفئات
-            order = [
-                "أقل من سنة",
-                "1 - 3 سنوات",
-                "3 - 5 سنوات",
-                "5 - 10 سنوات",
-                "10 - 15 سنة",
-                "أكثر من 15 سنة"
-            ]
+            st.markdown(
+                "### توزيع مدة الخدمة"
+            )
 
-            if not service_table.empty:
+            st.dataframe(
+                service_table,
+                use_container_width=True,
+                hide_index=True
+            )
 
-                service_table[
-                    "فئة مدة الخدمة"
-                ] = service_table[
-                    "فئة مدة الخدمة"
-                ].astype(str)
+            show_bar_chart(
+                service_table,
+                "فئة مدة الخدمة",
+                title="توزيع مدة الخدمة",
+                horizontal=False,
+                key="service_length_chart"
+            )
 
-                service_table["_order"] = (
-                    service_table[
-                        "فئة مدة الخدمة"
-                    ].map(
-                        {
-                            v: i
-                            for i, v in enumerate(
-                                order
-                            )
-                        }
-                    )
-                )
-
-                service_table = (
-                    service_table
-                    .sort_values("_order")
-                    .drop(columns="_order")
-                )
-
-                st.dataframe(
-                    service_table,
-                    use_container_width=True,
-                    hide_index=True
-                )
-
-                show_bar_chart(
-                    service_table,
-                    "فئة مدة الخدمة",
-                    title="توزيع الموظفين حسب مدة الخدمة"
-                )
-
-            # حسب الدائرة
-            if "رمز الدائرة" in filtered_df.columns:
+            if (
+                "رمز الدائرة"
+                in filtered_df.columns
+            ):
 
                 st.markdown(
                     "### متوسط مدة الخدمة حسب الدائرة"
@@ -1409,7 +2435,9 @@ elif analysis_option == "تحليل مدة الخدمة":
 
                 service_dept = (
                     filtered_df
-                    .groupby("رمز الدائرة")[
+                    .groupby(
+                        "رمز الدائرة"
+                    )[
                         "مدة الخدمة بالسنوات"
                     ]
                     .agg(
@@ -1426,7 +2454,7 @@ elif analysis_option == "تحليل مدة الخدمة":
                 )
 
                 service_dept.columns = [
-                    "رمز الدائرة",
+                    "الدائرة",
                     "عدد الحالات",
                     "متوسط مدة الخدمة",
                     "الوسيط",
@@ -1442,8 +2470,9 @@ elif analysis_option == "تحليل مدة الخدمة":
 
 
 # ============================================================
-# 6. الفئات والمجموعات الوظيفية
+# OPTION 6 - JOB GROUPS
 # ============================================================
+
 elif analysis_option == "تحليل الفئات والمجموعات الوظيفية":
 
     st.subheader(
@@ -1456,15 +2485,21 @@ elif analysis_option == "تحليل الفئات والمجموعات الوظي
         "المجموعة الوظيفية الفرعية"
     ]
 
-    for col in job_columns:
+    for index, col in enumerate(
+        job_columns
+    ):
 
         if col in filtered_df.columns:
 
-            st.markdown(f"### {col}")
+            st.markdown(
+                f"### {col}"
+            )
 
-            table = build_count_table(
-                filtered_df,
-                col
+            table = (
+                build_count_table(
+                    filtered_df,
+                    col
+                )
             )
 
             st.dataframe(
@@ -1477,26 +2512,35 @@ elif analysis_option == "تحليل الفئات والمجموعات الوظي
                 table.head(20),
                 col,
                 title=col,
-                horizontal=True
+                horizontal=True,
+                key=f"job_group_{index}"
             )
 
 
 # ============================================================
-# 7. الدرجات والمسميات
+# OPTION 7 - GRADES AND TITLES
 # ============================================================
+
 elif analysis_option == "تحليل الدرجات والمسميات الوظيفية":
 
     st.subheader(
         "💼 تحليل الدرجات والمسميات الوظيفية"
     )
 
-    if "الدرجة الوظيفية" in filtered_df.columns:
+    if (
+        "الدرجة الوظيفية"
+        in filtered_df.columns
+    ):
 
-        st.markdown("### الدرجات الوظيفية")
+        st.markdown(
+            "### الدرجات الوظيفية"
+        )
 
-        grade_table = build_count_table(
-            filtered_df,
-            "الدرجة الوظيفية"
+        grade_table = (
+            build_count_table(
+                filtered_df,
+                "الدرجة الوظيفية"
+            )
         )
 
         st.dataframe(
@@ -1508,19 +2552,25 @@ elif analysis_option == "تحليل الدرجات والمسميات الوظي
         show_bar_chart(
             grade_table,
             "الدرجة الوظيفية",
-            title="انتهاء الخدمة حسب الدرجة الوظيفية",
-            horizontal=True
+            title="انتهاء الخدمة حسب الدرجة",
+            horizontal=True,
+            key="grade_chart"
         )
 
-    if "المسمى الوظيفي" in filtered_df.columns:
+    if (
+        "المسمى الوظيفي"
+        in filtered_df.columns
+    ):
 
         st.markdown(
-            "### أعلى المسميات الوظيفية"
+            "### المسميات الوظيفية"
         )
 
-        title_table = build_count_table(
-            filtered_df,
-            "المسمى الوظيفي"
+        title_table = (
+            build_count_table(
+                filtered_df,
+                "المسمى الوظيفي"
+            )
         )
 
         st.dataframe(
@@ -1532,26 +2582,37 @@ elif analysis_option == "تحليل الدرجات والمسميات الوظي
         show_bar_chart(
             title_table.head(20),
             "المسمى الوظيفي",
-            title="أعلى 20 مسمى وظيفي",
-            horizontal=True
+            title="أعلى المسميات الوظيفية",
+            horizontal=True,
+            key="title_chart"
         )
 
 
 # ============================================================
-# 8. الجنسية
+# OPTION 8 - NATIONALITY
 # ============================================================
+
 elif analysis_option == "تحليل الجنسية":
 
-    st.subheader("🌍 تحليل الجنسية")
+    st.subheader(
+        "🌍 تحليل الجنسية"
+    )
 
-    if "فئة الجنسية" in filtered_df.columns:
+    if (
+        "فئة الجنسية"
+        in filtered_df.columns
+    ):
 
-        nationality_category = build_count_table(
-            filtered_df,
-            "فئة الجنسية"
+        st.markdown(
+            "### فئة الجنسية"
         )
 
-        st.markdown("### فئة الجنسية")
+        nationality_category = (
+            build_count_table(
+                filtered_df,
+                "فئة الجنسية"
+            )
+        )
 
         st.dataframe(
             nationality_category,
@@ -1559,63 +2620,72 @@ elif analysis_option == "تحليل الجنسية":
             hide_index=True
         )
 
-        fig = px.pie(
-            nationality_category,
-            names="فئة الجنسية",
-            values="العدد",
-            hole=0.45
+    if (
+        "الجنسية"
+        in filtered_df.columns
+    ):
+
+        st.markdown(
+            "### الجنسية"
         )
 
-        st.plotly_chart(
-            fig,
-            use_container_width=True,
-            key="nationality_category"
-        )
-
-    if "الجنسية" in filtered_df.columns:
-
-        st.markdown("### الجنسية")
-
-        nationality = build_count_table(
-            filtered_df,
-            "الجنسية"
+        nationality_table = (
+            build_count_table(
+                filtered_df,
+                "الجنسية"
+            )
         )
 
         st.dataframe(
-            nationality,
+            nationality_table,
             use_container_width=True,
             hide_index=True
         )
 
         show_bar_chart(
-            nationality.head(20),
+            nationality_table.head(20),
             "الجنسية",
-            title="أعلى الجنسيات",
-            horizontal=True
+            title="توزيع الجنسيات",
+            horizontal=True,
+            key="nationality_chart"
         )
 
 
 # ============================================================
-# 9. التحليل المالي
+# OPTION 9 - FINANCIAL
 # ============================================================
+
 elif analysis_option == "التحليل المالي":
 
-    st.subheader("💰 التحليل المالي")
+    st.subheader(
+        "💰 التحليل المالي"
+    )
 
     salary_available = (
-        "مجموع الراتب" in filtered_df.columns
+        "مجموع الراتب"
+        in filtered_df.columns
     )
 
     basic_available = (
-        "الراتب الاساسي" in filtered_df.columns
+        "الراتب الاساسي"
+        in filtered_df.columns
     )
 
-    if not salary_available and not basic_available:
-        st.warning("حقول الرواتب غير موجودة.")
+    if (
+        not salary_available
+        and
+        not basic_available
+    ):
+
+        st.warning(
+            "حقول الرواتب غير موجودة."
+        )
 
     else:
 
-        c1, c2, c3, c4 = st.columns(4)
+        c1, c2, c3, c4 = (
+            st.columns(4)
+        )
 
         if salary_available:
 
@@ -1627,6 +2697,18 @@ elif analysis_option == "التحليل المالي":
             c2.metric(
                 "متوسط مجموع الراتب",
                 f"{filtered_df['مجموع الراتب'].mean():,.2f}"
+            )
+
+        else:
+
+            c1.metric(
+                "إجمالي مجموع الرواتب",
+                "—"
+            )
+
+            c2.metric(
+                "متوسط مجموع الراتب",
+                "—"
             )
 
         if basic_available:
@@ -1641,10 +2723,23 @@ elif analysis_option == "التحليل المالي":
                 f"{filtered_df['الراتب الاساسي'].mean():,.2f}"
             )
 
-        # حسب الدائرة
+        else:
+
+            c3.metric(
+                "إجمالي الراتب الأساسي",
+                "—"
+            )
+
+            c4.metric(
+                "متوسط الراتب الأساسي",
+                "—"
+            )
+
         if (
-            "رمز الدائرة" in filtered_df.columns
-            and salary_available
+            "رمز الدائرة"
+            in filtered_df.columns
+            and
+            salary_available
         ):
 
             st.markdown(
@@ -1653,7 +2748,9 @@ elif analysis_option == "التحليل المالي":
 
             financial_dept = (
                 filtered_df
-                .groupby("رمز الدائرة")
+                .groupby(
+                    "رمز الدائرة"
+                )
                 .agg(
                     عدد_الحالات=(
                         "رمز الدائرة",
@@ -1672,43 +2769,17 @@ elif analysis_option == "التحليل المالي":
                 .reset_index()
             )
 
-            if basic_available:
-
-                basic = (
-                    filtered_df
-                    .groupby("رمز الدائرة")[
-                        "الراتب الاساسي"
-                    ]
-                    .agg(["sum", "mean"])
-                    .round(2)
-                    .reset_index()
-                )
-
-                basic.columns = [
-                    "رمز الدائرة",
-                    "إجمالي الراتب الأساسي",
-                    "متوسط الراتب الأساسي"
-                ]
-
-                financial_dept = (
-                    financial_dept.merge(
-                        basic,
-                        on="رمز الدائرة",
-                        how="left"
-                    )
-                )
-
             st.dataframe(
                 financial_dept,
                 use_container_width=True,
                 hide_index=True
             )
 
-        # حسب السبب
         if (
             "سبب انتهاء الخدمة"
             in filtered_df.columns
-            and salary_available
+            and
+            salary_available
         ):
 
             st.markdown(
@@ -1720,7 +2791,9 @@ elif analysis_option == "التحليل المالي":
                 .groupby(
                     "سبب انتهاء الخدمة",
                     dropna=False
-                )["مجموع الراتب"]
+                )[
+                    "مجموع الراتب"
+                ]
                 .agg(
                     [
                         "count",
@@ -1749,33 +2822,65 @@ elif analysis_option == "التحليل المالي":
 
 
 # ============================================================
-# 10. Trends
+# OPTION 10 - TRENDS
 # ============================================================
+
 elif analysis_option == "الاتجاهات الزمنية Trends":
 
-    st.subheader("📈 الاتجاهات الزمنية")
+    st.subheader(
+        "📈 الاتجاهات الزمنية"
+    )
 
-    if "سنة انتهاء الخدمة" not in filtered_df.columns:
+    if (
+        "سنة انتهاء الخدمة"
+        not in filtered_df.columns
+    ):
+
         st.warning(
-            "لا يمكن إجراء التحليل الزمني بدون "
-            "تاريخ انتهاء الخدمة."
+            "تاريخ انتهاء الخدمة غير متوفر."
         )
 
     else:
 
-        # سنوي
         yearly = (
             filtered_df
-            .dropna(subset=["سنة انتهاء الخدمة"])
-            .groupby("سنة انتهاء الخدمة")
+            .dropna(
+                subset=[
+                    "سنة انتهاء الخدمة"
+                ]
+            )
+            .groupby(
+                "سنة انتهاء الخدمة"
+            )
             .size()
-            .reset_index(name="العدد")
-            .sort_values("سنة انتهاء الخدمة")
+            .reset_index(
+                name="العدد"
+            )
+            .sort_values(
+                "سنة انتهاء الخدمة"
+            )
         )
 
-        st.markdown("### الاتجاه السنوي")
-
         if not yearly.empty:
+
+            yearly[
+                "سنة انتهاء الخدمة"
+            ] = (
+                yearly[
+                    "سنة انتهاء الخدمة"
+                ]
+                .astype(int)
+            )
+
+            st.markdown(
+                "### الاتجاه السنوي"
+            )
+
+            st.dataframe(
+                yearly,
+                use_container_width=True,
+                hide_index=True
+            )
 
             fig = px.line(
                 yearly,
@@ -1788,44 +2893,60 @@ elif analysis_option == "الاتجاهات الزمنية Trends":
             st.plotly_chart(
                 fig,
                 use_container_width=True,
-                key="yearly_trend"
+                key="trend_yearly"
             )
 
-        # شهري
-        if "شهر انتهاء الخدمة" in filtered_df.columns:
+        if (
+            "شهر انتهاء الخدمة"
+            in filtered_df.columns
+        ):
 
             monthly = (
                 filtered_df
                 .dropna(
-                    subset=["تاريخ انتهاء الخدمة"]
+                    subset=[
+                        "تاريخ انتهاء الخدمة"
+                    ]
                 )
-                .groupby("شهر انتهاء الخدمة")
+                .groupby(
+                    "شهر انتهاء الخدمة"
+                )
                 .size()
-                .reset_index(name="العدد")
+                .reset_index(
+                    name="العدد"
+                )
                 .sort_values(
                     "شهر انتهاء الخدمة"
                 )
             )
 
-            st.markdown("### الاتجاه الشهري")
+            st.markdown(
+                "### الاتجاه الشهري"
+            )
 
-            if not monthly.empty:
+            st.dataframe(
+                monthly,
+                use_container_width=True,
+                hide_index=True
+            )
 
-                fig = px.line(
-                    monthly,
-                    x="شهر انتهاء الخدمة",
-                    y="العدد",
-                    markers=True
-                )
+            fig = px.line(
+                monthly,
+                x="شهر انتهاء الخدمة",
+                y="العدد",
+                markers=True
+            )
 
-                st.plotly_chart(
-                    fig,
-                    use_container_width=True,
-                    key="monthly_trend"
-                )
+            st.plotly_chart(
+                fig,
+                use_container_width=True,
+                key="trend_monthly"
+            )
 
-        # سنة × دائرة
-        if "رمز الدائرة" in filtered_df.columns:
+        if (
+            "رمز الدائرة"
+            in filtered_df.columns
+        ):
 
             st.markdown(
                 "### الاتجاه السنوي حسب الدائرة"
@@ -1834,7 +2955,9 @@ elif analysis_option == "الاتجاهات الزمنية Trends":
             yearly_dept = (
                 filtered_df
                 .dropna(
-                    subset=["سنة انتهاء الخدمة"]
+                    subset=[
+                        "سنة انتهاء الخدمة"
+                    ]
                 )
                 .groupby(
                     [
@@ -1843,163 +2966,166 @@ elif analysis_option == "الاتجاهات الزمنية Trends":
                     ]
                 )
                 .size()
-                .reset_index(name="العدد")
-            )
-
-            fig = px.line(
-                yearly_dept,
-                x="سنة انتهاء الخدمة",
-                y="العدد",
-                color="رمز الدائرة",
-                markers=True
-            )
-
-            st.plotly_chart(
-                fig,
-                use_container_width=True,
-                key="yearly_dept_trend"
-            )
-
-        # سنة × السبب
-        if (
-            "سبب انتهاء الخدمة"
-            in filtered_df.columns
-        ):
-
-            st.markdown(
-                "### الاتجاه السنوي حسب سبب انتهاء الخدمة"
-            )
-
-            yearly_reason = (
-                filtered_df
-                .dropna(
-                    subset=["سنة انتهاء الخدمة"]
+                .reset_index(
+                    name="العدد"
                 )
-                .groupby(
-                    [
-                        "سنة انتهاء الخدمة",
-                        "سبب انتهاء الخدمة"
-                    ],
-                    dropna=False
+            )
+
+            if not yearly_dept.empty:
+
+                yearly_dept[
+                    "سنة انتهاء الخدمة"
+                ] = (
+                    yearly_dept[
+                        "سنة انتهاء الخدمة"
+                    ]
+                    .astype(int)
                 )
-                .size()
-                .reset_index(name="العدد")
-            )
 
-            fig = px.line(
-                yearly_reason,
-                x="سنة انتهاء الخدمة",
-                y="العدد",
-                color="سبب انتهاء الخدمة",
-                markers=True
-            )
+                fig = px.line(
+                    yearly_dept,
+                    x="سنة انتهاء الخدمة",
+                    y="العدد",
+                    color="رمز الدائرة",
+                    markers=True
+                )
 
-            st.plotly_chart(
-                fig,
-                use_container_width=True,
-                key="yearly_reason_trend"
-            )
+                st.plotly_chart(
+                    fig,
+                    use_container_width=True,
+                    key="trend_dept"
+                )
 
 
 # ============================================================
-# 11. الخروج المبكر
+# OPTION 11 - EARLY EXIT
 # ============================================================
+
 elif analysis_option == "الخروج المبكر من الخدمة":
 
-    st.subheader("⚠️ تحليل الخروج المبكر من الخدمة")
+    st.subheader(
+        "⚠️ تحليل الخروج المبكر من الخدمة"
+    )
 
-    if "مدة الخدمة بالسنوات" not in filtered_df.columns:
+    if (
+        "مدة الخدمة بالسنوات"
+        not in filtered_df.columns
+    ):
+
         st.warning(
-            "لا يمكن حساب الخروج المبكر بدون مدة الخدمة."
+            "لا يمكن حساب الخروج المبكر."
         )
 
     else:
 
-        valid_service_df = filtered_df[
+        valid_service_df = (
             filtered_df[
-                "مدة الخدمة بالسنوات"
-            ].notna()
-        ].copy()
+                filtered_df[
+                    "مدة الخدمة بالسنوات"
+                ].notna()
+            ]
+            .copy()
+        )
 
         if valid_service_df.empty:
+
             st.warning(
                 "لا توجد مدد خدمة صالحة."
             )
 
         else:
 
-            less_1 = valid_service_df[
+            less_1 = (
                 valid_service_df[
-                    "مدة الخدمة بالسنوات"
-                ] < 1
-            ]
+                    valid_service_df[
+                        "مدة الخدمة بالسنوات"
+                    ] < 1
+                ]
+            )
 
-            less_3 = valid_service_df[
+            less_3 = (
                 valid_service_df[
-                    "مدة الخدمة بالسنوات"
-                ] < 3
-            ]
-
-            total_valid = count_unique_employees(
-                valid_service_df
+                    valid_service_df[
+                        "مدة الخدمة بالسنوات"
+                    ] < 3
+                ]
             )
 
-            less_1_count = count_unique_employees(
-                less_1
+            total_valid = (
+                count_unique_employees(
+                    valid_service_df
+                )
             )
 
-            less_3_count = count_unique_employees(
-                less_3
+            less_1_count = (
+                count_unique_employees(
+                    less_1
+                )
             )
 
-            less_1_pct = (
-                less_1_count / total_valid * 100
-                if total_valid
-                else 0
+            less_3_count = (
+                count_unique_employees(
+                    less_3
+                )
             )
 
-            less_3_pct = (
-                less_3_count / total_valid * 100
-                if total_valid
-                else 0
-            )
+            if total_valid > 0:
 
-            c1, c2, c3, c4 = st.columns(4)
+                less_1_pct = (
+                    less_1_count
+                    / total_valid
+                    * 100
+                )
+
+                less_3_pct = (
+                    less_3_count
+                    / total_valid
+                    * 100
+                )
+
+            else:
+
+                less_1_pct = 0
+                less_3_pct = 0
+
+            c1, c2, c3, c4 = (
+                st.columns(4)
+            )
 
             c1.metric(
                 "خروج خلال أول سنة",
-                format_number(less_1_count)
+                f"{less_1_count:,}"
             )
 
             c2.metric(
                 "نسبة الخروج خلال أول سنة",
-                f"{less_1_pct:.1f}%"
+                f"{less_1_pct:.2f}%"
             )
 
             c3.metric(
                 "خروج خلال أول 3 سنوات",
-                format_number(less_3_count)
+                f"{less_3_count:,}"
             )
 
             c4.metric(
                 "نسبة الخروج خلال أول 3 سنوات",
-                f"{less_3_pct:.1f}%"
+                f"{less_3_pct:.2f}%"
             )
 
-            # تحليل أقل من 3 سنوات
-            st.markdown(
-                "### تفاصيل حالات الخروج خلال أول 3 سنوات"
-            )
-
-            if "رمز الدائرة" in less_3.columns:
-
-                early_dept = build_count_table(
-                    less_3,
-                    "رمز الدائرة"
-                )
+            if (
+                "رمز الدائرة"
+                in less_3.columns
+            ):
 
                 st.markdown(
-                    "#### حسب الدائرة"
+                    "### الخروج خلال أول 3 سنوات حسب الدائرة"
+                )
+
+                early_dept = (
+                    build_count_table(
+                        less_3,
+                        "رمز الدائرة"
+                    )
                 )
 
                 st.dataframe(
@@ -2008,25 +3134,20 @@ elif analysis_option == "الخروج المبكر من الخدمة":
                     hide_index=True
                 )
 
-                show_bar_chart(
-                    early_dept,
-                    "رمز الدائرة",
-                    title="الخروج المبكر حسب الدائرة",
-                    horizontal=True
-                )
-
             if (
                 "سبب انتهاء الخدمة"
                 in less_3.columns
             ):
 
-                early_reason = build_count_table(
-                    less_3,
-                    "سبب انتهاء الخدمة"
+                st.markdown(
+                    "### أسباب الخروج خلال أول 3 سنوات"
                 )
 
-                st.markdown(
-                    "#### حسب سبب انتهاء الخدمة"
+                early_reason = (
+                    build_count_table(
+                        less_3,
+                        "سبب انتهاء الخدمة"
+                    )
                 )
 
                 st.dataframe(
@@ -2035,27 +3156,13 @@ elif analysis_option == "الخروج المبكر من الخدمة":
                     hide_index=True
                 )
 
-            if "المسمى الوظيفي" in less_3.columns:
-
-                early_job = build_count_table(
-                    less_3,
-                    "المسمى الوظيفي"
-                ).head(20)
-
-                st.markdown(
-                    "#### أعلى المسميات في الخروج المبكر"
-                )
-
-                st.dataframe(
-                    early_job,
-                    use_container_width=True,
-                    hide_index=True
-                )
-
-            # الاستقالات المبكرة
-            early_resignation = less_3[
-                find_resignation_mask(less_3)
-            ]
+            early_resignation = (
+                less_3[
+                    find_resignation_mask(
+                        less_3
+                    )
+                ]
+            )
 
             early_resignation_count = (
                 count_unique_employees(
@@ -2065,39 +3172,42 @@ elif analysis_option == "الخروج المبكر من الخدمة":
 
             st.metric(
                 "الاستقالات خلال أول 3 سنوات",
-                format_number(
-                    early_resignation_count
-                )
+                f"{early_resignation_count:,}"
             )
 
 
 # ============================================================
-# 12. جودة البيانات
+# OPTION 12 - DATA QUALITY
 # ============================================================
+
 elif analysis_option == "جودة البيانات":
 
-    st.subheader("🧹 جودة البيانات بعد التنظيف")
+    st.subheader(
+        "🧹 جودة البيانات"
+    )
 
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2, c3, c4 = (
+        st.columns(4)
+    )
 
     c1.metric(
         "عدد الصفوف الأصلية",
-        format_number(original_row_count)
+        f"{original_row_count:,}"
     )
 
     c2.metric(
         "تواريخ تعيين غير مقروءة",
-        format_number(invalid_hire_dates)
+        f"{invalid_hire_dates:,}"
     )
 
     c3.metric(
         "تواريخ انتهاء غير مقروءة",
-        format_number(invalid_end_dates)
+        f"{invalid_end_dates:,}"
     )
 
     c4.metric(
         "انتهاء قبل تاريخ التعيين",
-        format_number(negative_service)
+        f"{negative_service:,}"
     )
 
     quality_rows = []
@@ -2106,26 +3216,48 @@ elif analysis_option == "جودة البيانات":
 
         if col in df.columns:
 
-            missing = df[col].isna().sum()
+            missing = (
+                df[col]
+                .isna()
+                .sum()
+            )
+
+            if len(df) > 0:
+
+                completeness = (
+                    1
+                    -
+                    missing
+                    / len(df)
+                ) * 100
+
+            else:
+
+                completeness = 0
 
             quality_rows.append(
                 {
-                    "الحقل": col,
-                    "عدد السجلات": len(df),
-                    "القيم المفقودة": missing,
-                    "نسبة الاكتمال %": round(
-                        (
-                            1 - missing / len(df)
-                        ) * 100,
-                        2
-                    )
-                    if len(df) > 0
-                    else 0
+                    "الحقل":
+                        col,
+
+                    "عدد السجلات":
+                        len(df),
+
+                    "القيم المفقودة":
+                        missing,
+
+                    "نسبة الاكتمال %":
+                        round(
+                            completeness,
+                            2
+                        )
                 }
             )
 
-    quality_table = pd.DataFrame(
-        quality_rows
+    quality_table = (
+        pd.DataFrame(
+            quality_rows
+        )
     )
 
     st.dataframe(
@@ -2134,10 +3266,9 @@ elif analysis_option == "جودة البيانات":
         hide_index=True
     )
 
-    st.markdown("### عينة من البيانات بعد التنظيف")
-
     preview_cols = [
-        c for c in [
+        col
+        for col in [
             "الرقم الوظيفي",
             "اسم الموظف",
             "تاريخ التعيين",
@@ -2146,137 +3277,332 @@ elif analysis_option == "جودة البيانات":
             "مجموع الراتب",
             "الراتب الاساسي"
         ]
-        if c in df.columns
+        if col in df.columns
     ]
 
+    st.markdown(
+        "### عينة بعد التنظيف"
+    )
+
     st.dataframe(
-        df[preview_cols].head(50),
+        df[
+            preview_cols
+        ].head(50),
         use_container_width=True,
         hide_index=True
     )
 
 
 # ============================================================
-# تصدير النتائج إلى Excel
+# EXCEL EXPORT
 # ============================================================
+
 st.divider()
-st.subheader("📥 تصدير النتائج")
+
+st.subheader(
+    "📥 تحميل نتائج التحليل"
+)
 
 export_sheets = {
-    "البيانات بعد التنظيف": filtered_df
-}
-
-# إضافة جداول أساسية
-if "رمز الدائرة" in filtered_df.columns:
-    export_sheets["حسب الدائرة"] = (
-        build_count_table(
-            filtered_df,
-            "رمز الدائرة"
-        )
-    )
-
-if "سبب انتهاء الخدمة" in filtered_df.columns:
-    export_sheets["أسباب انتهاء الخدمة"] = (
-        build_count_table(
-            filtered_df,
-            "سبب انتهاء الخدمة"
-        )
-    )
-
-if "سبب الاستقالة" in filtered_df.columns:
-    resignation_export = filtered_df[
-        find_resignation_mask(filtered_df)
-    ]
-
-    export_sheets["أسباب الاستقالة"] = (
-        build_count_table(
-            resignation_export,
-            "سبب الاستقالة"
-        )
-    )
-
-if "فئة مدة الخدمة" in filtered_df.columns:
-    export_sheets["مدة الخدمة"] = (
-        build_count_table(
-            filtered_df,
-            "فئة مدة الخدمة"
-        )
-    )
-
-if "سنة انتهاء الخدمة" in filtered_df.columns:
-    export_sheets["الاتجاه السنوي"] = (
+    "البيانات بعد التنظيف":
         filtered_df
-        .dropna(subset=["سنة انتهاء الخدمة"])
-        .groupby("سنة انتهاء الخدمة")
-        .size()
-        .reset_index(name="العدد")
-    )
-
-# جدول مؤشرات عامة
-summary_data = {
-    "المؤشر": [
-        "إجمالي المنتهية خدماتهم",
-        "عدد الاستقالات",
-        "نسبة الاستقالات %",
-        "متوسط مدة الخدمة",
-        "وسيط مدة الخدمة",
-        "إجمالي مجموع الرواتب",
-        "متوسط مجموع الراتب"
-    ],
-    "القيمة": [
-        employee_count,
-        resignation_count,
-        round(resignation_pct, 2),
-        round(avg_service, 2)
-        if pd.notna(avg_service)
-        else np.nan,
-        round(median_service, 2)
-        if pd.notna(median_service)
-        else np.nan,
-        round(total_salary, 2)
-        if pd.notna(total_salary)
-        else np.nan,
-        round(avg_salary, 2)
-        if pd.notna(avg_salary)
-        else np.nan
-    ]
 }
+
+
+# ------------------------------------------------------------
+# SUMMARY
+# ------------------------------------------------------------
+
+summary_table = pd.DataFrame(
+    {
+        "المؤشر": [
+            "إجمالي المنتهية خدماتهم",
+            "عدد الاستقالات",
+            "نسبة الاستقالات %",
+            "متوسط مدة الخدمة",
+            "وسيط مدة الخدمة",
+            "إجمالي مجموع الرواتب",
+            "متوسط مجموع الراتب"
+        ],
+
+        "القيمة": [
+            employee_count,
+            resignation_count,
+            round(
+                resignation_pct,
+                2
+            ),
+            round(
+                avg_service,
+                2
+            )
+            if pd.notna(
+                avg_service
+            )
+            else np.nan,
+            round(
+                median_service,
+                2
+            )
+            if pd.notna(
+                median_service
+            )
+            else np.nan,
+            round(
+                total_salary,
+                2
+            )
+            if pd.notna(
+                total_salary
+            )
+            else np.nan,
+            round(
+                avg_salary,
+                2
+            )
+            if pd.notna(
+                avg_salary
+            )
+            else np.nan
+        ]
+    }
+)
 
 export_sheets[
     "المؤشرات العامة"
-] = pd.DataFrame(summary_data)
+] = summary_table
+
+
+# ------------------------------------------------------------
+# END REASONS EXPORT
+# ------------------------------------------------------------
+
+if (
+    "سبب انتهاء الخدمة"
+    in filtered_df.columns
+):
+
+    export_sheets[
+        "أسباب انتهاء الخدمة"
+    ] = build_count_table(
+        filtered_df,
+        "سبب انتهاء الخدمة"
+    )
+
+
+# ------------------------------------------------------------
+# DEPARTMENT EXPORT
+# ------------------------------------------------------------
+
+if (
+    "رمز الدائرة"
+    in filtered_df.columns
+):
+
+    export_sheets[
+        "المنتهية حسب الدائرة"
+    ] = build_count_table(
+        filtered_df,
+        "رمز الدائرة"
+    )
+
+
+# ------------------------------------------------------------
+# RESIGNATIONS BY DEPARTMENT EXPORT
+# ------------------------------------------------------------
+
+if (
+    not resignation_df.empty
+    and
+    "رمز الدائرة"
+    in resignation_df.columns
+):
+
+    if (
+        "الرقم الوظيفي"
+        in resignation_df.columns
+    ):
+
+        export_resignation_dept = (
+            resignation_df
+            .groupby(
+                "رمز الدائرة"
+            )[
+                "الرقم الوظيفي"
+            ]
+            .nunique()
+            .reset_index(
+                name="عدد المستقيلين"
+            )
+        )
+
+    else:
+
+        export_resignation_dept = (
+            resignation_df
+            .groupby(
+                "رمز الدائرة"
+            )
+            .size()
+            .reset_index(
+                name="عدد المستقيلين"
+            )
+        )
+
+    export_resignation_dept = (
+        export_resignation_dept
+        .sort_values(
+            "عدد المستقيلين",
+            ascending=False
+        )
+    )
+
+    total_export_resignations = (
+        export_resignation_dept[
+            "عدد المستقيلين"
+        ].sum()
+    )
+
+    if total_export_resignations > 0:
+
+        export_resignation_dept[
+            "النسبة من إجمالي الاستقالات %"
+        ] = (
+            export_resignation_dept[
+                "عدد المستقيلين"
+            ]
+            / total_export_resignations
+            * 100
+        ).round(2)
+
+    export_sheets[
+        "الاستقالات حسب الدائرة"
+    ] = export_resignation_dept
+
+
+# ------------------------------------------------------------
+# RESIGNATION REASONS EXPORT
+# ------------------------------------------------------------
+
+if (
+    not resignation_df.empty
+    and
+    "سبب الاستقالة"
+    in resignation_df.columns
+):
+
+    export_sheets[
+        "أسباب الاستقالة"
+    ] = build_count_table(
+        resignation_df,
+        "سبب الاستقالة"
+    )
+
+
+# ------------------------------------------------------------
+# SERVICE LENGTH EXPORT
+# ------------------------------------------------------------
+
+if (
+    "فئة مدة الخدمة"
+    in filtered_df.columns
+):
+
+    export_sheets[
+        "مدة الخدمة"
+    ] = build_count_table(
+        filtered_df,
+        "فئة مدة الخدمة"
+    )
+
+
+# ------------------------------------------------------------
+# YEARLY TREND EXPORT
+# ------------------------------------------------------------
+
+if (
+    "سنة انتهاء الخدمة"
+    in filtered_df.columns
+):
+
+    export_yearly = (
+        filtered_df
+        .dropna(
+            subset=[
+                "سنة انتهاء الخدمة"
+            ]
+        )
+        .groupby(
+            "سنة انتهاء الخدمة"
+        )
+        .size()
+        .reset_index(
+            name="العدد"
+        )
+    )
+
+    if not export_yearly.empty:
+
+        export_yearly[
+            "سنة انتهاء الخدمة"
+        ] = (
+            export_yearly[
+                "سنة انتهاء الخدمة"
+            ]
+            .astype(int)
+        )
+
+    export_sheets[
+        "الاتجاه السنوي"
+    ] = export_yearly
+
+
+# ------------------------------------------------------------
+# CREATE EXCEL
+# ------------------------------------------------------------
 
 try:
 
-    excel_output = create_excel_download(
-        export_sheets
+    excel_output = (
+        create_excel_download(
+            export_sheets
+        )
     )
 
     st.download_button(
-        label="⬇️ تحميل نتائج التحليل Excel",
+        label=(
+            "⬇️ تحميل ملف Excel "
+            "بكل النتائج"
+        ),
         data=excel_output,
-        file_name="تحليل_المنتهية_خدماتهم.xlsx",
+        file_name=(
+            "تحليل_المنتهية_خدماتهم.xlsx"
+        ),
         mime=(
-            "application/vnd.openxmlformats-"
-            "officedocument.spreadsheetml.sheet"
+            "application/"
+            "vnd.openxmlformats-"
+            "officedocument."
+            "spreadsheetml.sheet"
         )
     )
 
 except Exception as e:
+
     st.error(
         f"تعذر إنشاء ملف Excel: {e}"
     )
 
 
 # ============================================================
-# عرض البيانات التفصيلية
+# CLEAN DATA PREVIEW
 # ============================================================
+
 with st.expander(
     "🔍 عرض البيانات التفصيلية بعد التنظيف"
 ):
 
     st.write(
-        f"عدد السجلات بعد تطبيق الفلاتر: "
+        "عدد السجلات بعد الفلاتر: "
         f"{len(filtered_df):,}"
     )
 
